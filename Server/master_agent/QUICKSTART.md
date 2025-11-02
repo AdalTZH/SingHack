@@ -74,12 +74,40 @@ Once the server is running, visit:
 - Swagger UI: `http://localhost:9000/docs`
 - ReDoc: `http://localhost:9000/redoc`
 
+## 🤖 Agent Routing Logic
+
+The Master Agent uses intelligent routing to call the appropriate specialized agent:
+
+- **Insurance Plan Suggestions** → Goes directly to Predict Agent (no classification needed)
+- **Risk Assessment Queries** → Goes directly to Risk Agent for weather, disaster, and activity risk analysis
+- **Compare/Explain Queries** → Uses Classifier Agent to understand query intent, then provides response
+
+**Example routing:**
+- "Which insurance plan is best?" → Predict Agent
+- "What are the risks of traveling to Japan?" → Risk Agent
+- "Compare Product A and B" → Classifier Agent → Response
+
+## 🌍 Complete System Setup
+
+For full functionality, start all agents:
+
+1. **Risk Agent** (port 8003) - Risk assessment
+   ```bash
+   python -m risk_agent.server
+   ```
+
+2. **Master Agent** (port 9000) - Orchestration
+   ```bash
+   python -m master_agent.server
+   ```
+
 ## 🎯 Next Steps
 
 - Read `README.md` for detailed architecture
 - Explore agent integration examples
 - Customize routing logic
 - Add new specialized agents
+- Test risk assessment with travel queries
 
 ## 🐛 Troubleshooting
 

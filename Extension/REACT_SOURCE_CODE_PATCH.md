@@ -116,3 +116,4 @@ declare global {
 4. Check console logs for "📨 Received insurance prompt"
 5. Message should appear in chat automatically
 
+

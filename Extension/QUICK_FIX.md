@@ -84,3 +84,4 @@ After adding the code:
 4. Check console for: "✅ Registered chat message listener"
 5. Message should appear in chat automatically
 
+

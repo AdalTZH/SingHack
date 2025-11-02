@@ -15,6 +15,7 @@ import os
 
 from .config import SERVER_HOST, SERVER_PORT, ALLOWED_ORIGINS
 from .master_agent import MasterAgent
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,6 +41,68 @@ master_agent = None
 
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+def messages_from_dict(messages: Optional[List[Dict[str, Any]]]) -> List[BaseMessage]:
+    """
+    Convert list of message dictionaries to LangChain BaseMessage objects
+    
+    Args:
+        messages: List of message dicts with 'role' and 'content' keys
+                 Format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+    
+    Returns:
+        List of BaseMessage objects
+    """
+    if not messages:
+        return []
+    
+    result = []
+    for msg in messages:
+        role = msg.get("role", "").lower()
+        content = msg.get("content", "")
+        
+        if role == "user":
+            result.append(HumanMessage(content=content))
+        elif role == "assistant":
+            result.append(AIMessage(content=content))
+        elif role == "system":
+            result.append(SystemMessage(content=content))
+        else:
+            # Default to human message if role is unknown
+            logger.warning(f"Unknown message role: {role}, defaulting to HumanMessage")
+            result.append(HumanMessage(content=content))
+    
+    return result
+
+
+def messages_to_dict(messages: List[BaseMessage]) -> List[Dict[str, Any]]:
+    """
+    Convert LangChain BaseMessage objects to list of dictionaries for JSON serialization
+    
+    Args:
+        messages: List of BaseMessage objects
+    
+    Returns:
+        List of message dicts with 'role' and 'content' keys
+    """
+    result = []
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            result.append({"role": "user", "content": msg.content})
+        elif isinstance(msg, AIMessage):
+            result.append({"role": "assistant", "content": msg.content})
+        elif isinstance(msg, SystemMessage):
+            result.append({"role": "system", "content": msg.content})
+        else:
+            # Fallback for unknown message types
+            result.append({"role": "user", "content": str(msg.content)})
+    
+    return result
+
+
+# ============================================================================
 # Request/Response Models
 # ============================================================================
 
@@ -48,12 +111,17 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="User message")
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="Temperature for response")
     context: Optional[Dict[str, Any]] = Field(None, description="Session context")
+    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Previous conversation history. Format: [{\"role\": \"user\", \"content\": \"...\"}, {\"role\": \"assistant\", \"content\": \"...\"}]")
     
     class Config:
         json_schema_extra = {
             "example": {
                 "message": "Which insurance plan is best for skiing in Japan?",
-                "temperature": 0.7
+                "temperature": 0.7,
+                "messages": [
+                    {"role": "user", "content": "I'm planning a trip to Japan"},
+                    {"role": "assistant", "content": "That sounds exciting! Where in Japan are you planning to visit?"}
+                ]
             }
         }
 
@@ -66,6 +134,7 @@ class ChatResponse(BaseModel):
     agents_consulted: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Updated conversation history including current exchange")
     
     class Config:
         json_schema_extra = {
@@ -73,7 +142,11 @@ class ChatResponse(BaseModel):
                 "success": True,
                 "response": "Based on your skiing trip to Japan, I recommend...",
                 "classification": "recommendation",
-                "agents_consulted": ["predict", "risk"]
+                "agents_consulted": ["predict", "risk"],
+                "messages": [
+                    {"role": "user", "content": "Which insurance plan is best for skiing in Japan?"},
+                    {"role": "assistant", "content": "Based on your skiing trip to Japan, I recommend..."}
+                ]
             }
         }
 
@@ -174,6 +247,9 @@ async def chat_endpoint(request: ChatRequest):
     - Classifier Agent: Determines query type
     - Predict Agent: Provides insurance recommendations
     - Risk Agent: Assesses travel risks
+    
+    Supports conversation history via the 'messages' field in the request.
+    Returns updated messages in the response for maintaining context across requests.
     """
     global master_agent
     
@@ -181,12 +257,22 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=503, detail="Master Agent not initialized")
     
     logger.info(f"Received chat request: {request.message[:100]}...")
+    if request.messages:
+        logger.info(f"Received {len(request.messages)} previous messages for context")
     
     try:
+        # Convert message dictionaries to BaseMessage objects
+        langchain_messages = messages_from_dict(request.messages)
+        
         result = await master_agent.process_query(
             query=request.message,
-            context=request.context
+            context=request.context,
+            messages=langchain_messages if langchain_messages else None
         )
+        
+        # Convert BaseMessage objects back to dictionaries for JSON response
+        if result.get('messages'):
+            result['messages'] = messages_to_dict(result['messages'])
         
         return ChatResponse(**result)
     

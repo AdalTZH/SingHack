@@ -102,3 +102,4 @@ After setup:
 - Check `App.example.tsx` for integration examples
 - The infrastructure is ready - just connect React!
 
+

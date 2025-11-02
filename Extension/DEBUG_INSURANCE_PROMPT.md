@@ -164,3 +164,4 @@ chrome.runtime.sendMessage(testMessage);
 
 If this doesn't work, the React app definitely needs the event listener code.
 
+

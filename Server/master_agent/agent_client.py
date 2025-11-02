@@ -120,7 +120,7 @@ class AgentClient:
         
         Args:
             query: User query or risk assessment request
-            context: Additional context for risk assessment
+            context: Additional context for risk assessment (can include destination, dates, activities)
             base_url: Base URL of the risk agent service
             
         Returns:
@@ -129,9 +129,14 @@ class AgentClient:
         try:
             url = f"{base_url}/assess_risk"
             
+            # Format payload according to RiskAgent API
             payload = {
                 "query": query,
-                "context": context or {}
+                "destination": context.get("destination") if context else None,
+                "departure_date": context.get("departure_date") if context else None,
+                "return_date": context.get("return_date") if context else None,
+                "activities": context.get("activities") if context else None,
+                "context": context
             }
             
             logger.info(f"Calling Risk Agent: {url}")
@@ -145,7 +150,12 @@ class AgentClient:
             return {
                 "success": False,
                 "error": f"Risk assessment service unavailable: {str(e)}",
-                "risks": []
+                "weather_risks": [],
+                "natural_disasters": [],
+                "travel_advisories": [],
+                "activity_risks": [],
+                "overall_risk_level": "unknown",
+                "recommendations": []
             }
 
 

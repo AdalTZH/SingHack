@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Any, Annotated
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 import operator
 import logging
 
@@ -21,6 +21,7 @@ class MasterAgentState(TypedDict):
     """State schema for the master agent workflow"""
     user_query: str
     session_context: Dict[str, Any]
+    messages: Annotated[List[BaseMessage], operator.add]  # Chat history
     agent_responses: Annotated[List[Dict[str, Any]], operator.add]
     classification: Optional[str]
     routing_decision: Optional[str]
@@ -72,9 +73,11 @@ class MasterAgent:
         graph_builder.add_edge(START, "route_query")
         graph_builder.add_conditional_edges(
             "route_query",
-            self._should_classify,
+            self._route_to_agent,
             {
                 "classify": "call_classifier",
+                "predict": "call_predict",
+                "risk": "call_risk",
                 "direct": "synthesize_response",
                 END: END
             }
@@ -106,9 +109,9 @@ class MasterAgent:
         # Check for specific patterns
         if any(keyword in query_lower for keyword in ['compare', 'which', 'better', 'difference']):
             routing = "compare"
-        elif any(keyword in query_lower for keyword in ['recommend', 'best plan', 'suitable', 'insurance plan']):
+        elif any(keyword in query_lower for keyword in ['recommend', 'best plan', 'suitable', 'insurance plan', 'suggest']):
             routing = "predict"
-        elif any(keyword in query_lower for keyword in ['risk', 'danger', 'safe', 'advisory', 'disaster']):
+        elif any(keyword in query_lower for keyword in ['risk', 'danger', 'safe', 'advisory', 'disaster', 'natural', 'weather', 'traveling', 'country', 'activity']):
             routing = "risk"
         elif any(keyword in query_lower for keyword in ['explain', 'what', 'how', 'tell me']):
             routing = "explain"
@@ -121,9 +124,10 @@ class MasterAgent:
             'routing_decision': routing
         }
     
-    def _should_classify(self, state: MasterAgentState) -> str:
+    def _route_to_agent(self, state: MasterAgentState) -> str:
         """
-        Determine if classification is needed
+        Route to the appropriate agent based on routing decision
+        Only classify when NOT suggesting insurance plans (predict), not for risk assessment
         
         Args:
             state: Current state
@@ -133,8 +137,15 @@ class MasterAgent:
         """
         routing = state.get('routing_decision', 'general')
         
-        # Classification needed for compare/explain queries
-        if routing in ['compare', 'explain', 'general']:
+        # Route to specific agent based on decision
+        if routing == 'predict':
+            # For insurance plan suggestions, go directly to predict agent
+            return "predict"
+        elif routing == 'risk':
+            # For risk assessment, go directly to risk agent
+            return "risk"
+        elif routing in ['compare', 'explain', 'general']:
+            # For other queries, use classifier to understand intent
             return "classify"
         else:
             return "direct"
@@ -237,7 +248,7 @@ class MasterAgent:
     
     def _call_risk(self, state: MasterAgentState) -> Dict[str, Any]:
         """
-        Call the Risk Agent
+        Call the Risk Agent using the API
         
         Args:
             state: Current state
@@ -249,15 +260,44 @@ class MasterAgent:
         logger.info(f"Calling Risk Agent for: {user_query}")
         
         try:
-            # Risk Agent is MCP-based, return placeholder for now
-            # In production, this would use the MCP tools or API
-            result = {
-                'message': 'Risk Agent: Travel risk assessment based on location and dates.',
-                'risks': [],
-                'note': 'Risk assessment capabilities available via MCP tools'
-            }
+            # Use the risk agent API through agent_client
+            # Since agent_client methods are async, we need to handle this in a sync context
+            import asyncio
             
-            logger.info(f"Risk assessment result: {result}")
+            # Try to get the running event loop, or create a new one
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Call the async agent client method
+            risk_result = loop.run_until_complete(
+                self.agent_client.call_risk(
+                    query=user_query,
+                    context=None
+                )
+            )
+            
+            logger.info(f"Risk assessment result: {risk_result}")
+            
+            # Format the response for synthesis
+            if risk_result.get('success'):
+                result = {
+                    'message': f"Risk assessment for travel: {risk_result.get('overall_risk_level', 'unknown')} overall risk level",
+                    'overall_risk_level': risk_result.get('overall_risk_level'),
+                    'weather_risks': risk_result.get('weather_risks', []),
+                    'natural_disasters': risk_result.get('natural_disasters', []),
+                    'travel_advisories': risk_result.get('travel_advisories', []),
+                    'activity_risks': risk_result.get('activity_risks', []),
+                    'recommendations': risk_result.get('recommendations', [])
+                }
+            else:
+                result = {
+                    'message': 'Risk assessment service available',
+                    'error': risk_result.get('error', 'Unknown error'),
+                    'note': 'Risk assessment capabilities via MCP tools'
+                }
             
             return {
                 'agent_responses': [{
@@ -271,7 +311,11 @@ class MasterAgent:
             return {
                 'agent_responses': [{
                     'agent': 'risk',
-                    'error': str(e)
+                    'error': str(e),
+                    'result': {
+                        'message': 'Unable to complete risk assessment',
+                        'note': 'Service temporarily unavailable'
+                    }
                 }]
             }
     
@@ -288,66 +332,105 @@ class MasterAgent:
         user_query = state.get('user_query', '')
         agent_responses = state.get('agent_responses', [])
         classification = state.get('classification', 'general')
+        messages = state.get('messages', [])
         
-        logger.info(f"Synthesizing response from {len(agent_responses)} agent(s)")
+        logger.info(f"Synthesizing response from {len(agent_responses)} agent(s) with {len(messages)} previous messages")
         
-        # Use LLM to synthesize a coherent response
-        synthesis_prompt = f"""You are an AI insurance assistant helping users with travel insurance questions.
+        # Build message list with chat history
+        message_list = [
+            SystemMessage(content="You are a helpful travel insurance assistant with access to policy data, risk assessments, and recommendations.")
+        ]
+        
+        # Add previous conversation history
+        for msg in messages:
+            message_list.append(msg)
+        
+        # Add the current user query as a natural conversation message
+        message_list.append(HumanMessage(content=user_query))
+        
+        # Build agent context to help synthesize the response
+        agent_context = f"""Based on my analysis using specialized agents:
 
-User Query: "{user_query}"
 Classification: {classification}
 
-Agent Responses:"""
+Agent Analysis:"""
         
         for response in agent_responses:
             agent_name = response.get('agent', 'unknown')
             result = response.get('result', {})
-            synthesis_prompt += f"\n\n{agent_name.upper()} Agent:\n{result}"
+            agent_context += f"\n\n{agent_name.upper()} Agent:\n{result}"
         
-        synthesis_prompt += f"""
-
-Please provide a helpful, clear, and concise response to the user's query based on the information above."""
-
         try:
-            response = self.llm.invoke([
-                SystemMessage(content="You are a helpful travel insurance assistant with access to policy data, risk assessments, and recommendations."),
-                HumanMessage(content=synthesis_prompt)
-            ])
+            # Include agent context in system message when available
+            # This provides context while maintaining natural conversation flow
+            if agent_responses:
+                final_system = SystemMessage(
+                    content=f"""You are a helpful travel insurance assistant with access to policy data, risk assessments, and recommendations.
+
+{agent_context}
+
+Please provide a helpful, clear, and concise response to the user's query based on both the conversation history and the agent analysis above. Maintain context and continuity in your response."""
+                )
+                message_list_with_context = [final_system] + message_list[1:]  # Replace first system message
+            else:
+                message_list_with_context = message_list
+            
+            response = self.llm.invoke(message_list_with_context)
             
             final_response = response.content.strip()
             
             logger.info(f"Generated final response (length: {len(final_response)})")
             
+            # Add current user query and assistant response to messages
+            new_messages = [
+                HumanMessage(content=user_query),
+                AIMessage(content=final_response)
+            ]
+            
             return {
-                'final_response': final_response
+                'final_response': final_response,
+                'messages': new_messages
             }
         
         except Exception as e:
             logger.error(f"Error synthesizing response: {e}")
             # Fallback response
             fallback = f"I received your query: '{user_query}'. I'm currently processing this with multiple specialized agents and will provide you with comprehensive information shortly."
+            
+            # Add messages even on error
+            new_messages = [
+                HumanMessage(content=user_query),
+                AIMessage(content=fallback)
+            ]
+            
             return {
-                'final_response': fallback
+                'final_response': fallback,
+                'messages': new_messages
             }
     
-    async def process_query(self, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+    async def process_query(self, query: str, context: Optional[Dict] = None, messages: Optional[List[BaseMessage]] = None) -> Dict[str, Any]:
         """
         Main method to process a user query
         
         Args:
             query: User query
             context: Optional session context
+            messages: Optional list of previous conversation messages (BaseMessage objects)
             
         Returns:
             Response dictionary
         """
         logger.info(f"Processing query: {query}")
         
+        # Convert messages to list if provided, otherwise use empty list
+        initial_messages = messages if messages is not None else []
+        
         try:
             # Invoke the graph
             result = self.graph.invoke({
                 'user_query': query,
                 'session_context': context or {},
+                'messages': initial_messages,
                 'agent_responses': [],
                 'classification': None,
                 'routing_decision': None,
@@ -361,7 +444,8 @@ Please provide a helpful, clear, and concise response to the user's query based 
                 'agents_consulted': [r.get('agent') for r in result.get('agent_responses', [])],
                 'metadata': {
                     'routing_decision': result.get('routing_decision')
-                }
+                },
+                'messages': result.get('messages', [])  # Return updated messages for next request
             }
         
         except Exception as e:
@@ -369,7 +453,8 @@ Please provide a helpful, clear, and concise response to the user's query based 
             return {
                 'success': False,
                 'response': f"I encountered an error processing your query: {str(e)}",
-                'error': str(e)
+                'error': str(e),
+                'messages': initial_messages  # Return messages even on error
             }
     
     async def close(self):

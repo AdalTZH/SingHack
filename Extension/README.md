@@ -35,7 +35,7 @@ Open `config.js` in a text editor and configure:
 ```javascript
 const CONFIG = {
     USE_MASTER_AGENT: true,
-    MASTER_AGENT_URL: 'http://localhost:8000',
+    MASTER_AGENT_URL: 'http://localhost:9000',
     OPENAI_API_KEY: 'your-key'  // Still needed for fallback
 };
 ```
@@ -48,7 +48,7 @@ const CONFIG = {
 };
 ```
 
-**Note**: If using Master Agent, ensure the server is running at `http://localhost:8000`.
+**Note**: If using Master Agent, ensure the server is running at `http://localhost:9000`.
 
 ### 4. Start the Master Agent Server (if using Master Agent mode)
 

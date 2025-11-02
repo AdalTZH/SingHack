@@ -33,10 +33,10 @@ Server will start at `http://localhost:9000`
 
 ```bash
 # Health check
-curl http://localhost:8000/health
+curl http://localhost:9000/health
 
 # Send a chat message
-curl -X POST http://localhost:8000/chat \
+curl -X POST http://localhost:9000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Which insurance plan is best for traveling to Japan?"}'
 ```
@@ -48,7 +48,7 @@ import requests
 
 # Send a chat message
 response = requests.post(
-    'http://localhost:8000/chat',
+    'http://localhost:9000/chat',
     json={'message': 'Compare Product A and Product B'}
 )
 
@@ -61,7 +61,7 @@ print(response.json())
 ```javascript
 const CONFIG = {
     USE_MASTER_AGENT: true,
-    MASTER_AGENT_URL: 'http://localhost:8000'
+    MASTER_AGENT_URL: 'http://localhost:9000'
 };
 ```
 
@@ -71,8 +71,8 @@ const CONFIG = {
 ## 📊 API Documentation
 
 Once the server is running, visit:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- Swagger UI: `http://localhost:9000/docs`
+- ReDoc: `http://localhost:9000/redoc`
 
 ## 🎯 Next Steps
 
@@ -84,12 +84,12 @@ Once the server is running, visit:
 ## 🐛 Troubleshooting
 
 **Server won't start?**
-- Check if port 8000 is available
+- Check if port 9000 is available
 - Verify OpenAI API key is set
 - Ensure all dependencies installed
 
 **Extension can't connect?**
-- Verify server is running: `curl http://localhost:8000/health`
+- Verify server is running: `curl http://localhost:9000/health`
 - Check CORS settings in `config.py`
 - Review extension console for errors
 

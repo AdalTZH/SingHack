@@ -2,12 +2,16 @@
 FastAPI Server for Master Agent
 Exposes HTTP endpoints for the Chrome extension
 """
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 import logging
 import uvicorn
+import base64
+import io
+import tempfile
+import os
 
 from .config import SERVER_HOST, SERVER_PORT, ALLOWED_ORIGINS
 from .master_agent import MasterAgent
@@ -79,6 +83,35 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
+
+
+class SpeechToTextRequest(BaseModel):
+    """Request model for speech-to-text endpoint"""
+    audio_data: str = Field(..., description="Base64 encoded audio data")
+    format: Optional[str] = Field("webm", description="Audio format (webm, wav, mp3)")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "audio_data": "UklGRiQAAABXQVZFZm10...",
+                "format": "webm"
+            }
+        }
+
+
+class SpeechToTextResponse(BaseModel):
+    """Response model for speech-to-text endpoint"""
+    success: bool
+    text: Optional[str] = None
+    error: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "text": "Which insurance plan is best for my trip?"
+            }
+        }
 
 
 # ============================================================================
@@ -162,6 +195,69 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
+        )
+
+
+@app.post("/speech-to-text", response_model=SpeechToTextResponse)
+async def speech_to_text(request: SpeechToTextRequest):
+    """
+    Convert speech audio to text using OpenAI Whisper API
+    
+    Receives base64-encoded audio data from the Chrome extension
+    and returns transcribed text for chat processing.
+    """
+    try:
+        from openai import OpenAI
+        
+        # Get OpenAI API key from config
+        api_key = os.getenv('OPENAI_API_KEY', '')
+        if not api_key:
+            raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+        
+        client = OpenAI(api_key=api_key)
+        
+        # Decode base64 audio data
+        try:
+            audio_bytes = base64.b64decode(request.audio_data)
+        except Exception as e:
+            logger.error(f"Error decoding base64 audio: {e}")
+            raise HTTPException(status_code=400, detail="Invalid base64 audio data")
+        
+        # Save audio to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{request.format}') as temp_file:
+            temp_file.write(audio_bytes)
+            temp_file_path = temp_file.name
+        
+        try:
+            # Call OpenAI Whisper API
+            with open(temp_file_path, 'rb') as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language="en"  # Can be made configurable
+                )
+            
+            text = transcript.text
+            
+            logger.info(f"Speech transcribed successfully: {text[:100]}...")
+            
+            return SpeechToTextResponse(
+                success=True,
+                text=text
+            )
+        
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in speech-to-text: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Speech transcription failed: {str(e)}"
         )
 
 

@@ -7,7 +7,7 @@ Complete guide to set up and run the multi-agent travel insurance system.
 ```
 Chrome Extension
       ↓
-Master Agent (FastAPI Server on :8000)
+Master Agent (FastAPI Server on :9000)
       ↓
 ┌─────┴─────┬───────┬────────┐
 │           │       │        │
@@ -50,7 +50,7 @@ OPENAI_MODEL=gpt-4o-mini
 
 # Master Agent Configuration
 MASTER_AGENT_HOST=0.0.0.0
-MASTER_AGENT_PORT=8000
+MASTER_AGENT_PORT=9000
 
 # Database Configuration (for Predict Agent)
 DB_HOST=hackathon-db.ceqjfmi6jhdd.ap-southeast-1.rds.amazonaws.com
@@ -71,7 +71,7 @@ cd Server
 python -m master_agent.server
 ```
 
-Server starts at: `http://localhost:8000`
+Server starts at: `http://localhost:9000`
 
 **Verify it's running:**
 ```bash
@@ -85,7 +85,7 @@ Edit `Extension/config.js`:
 ```javascript
 const CONFIG = {
     OPENAI_API_KEY: 'your_api_key',
-    MASTER_AGENT_URL: 'http://localhost:8000',
+    MASTER_AGENT_URL: 'http://localhost:9000',
     USE_MASTER_AGENT: true  // Enable master agent mode
 };
 ```
@@ -140,7 +140,7 @@ The Master Agent uses **Agent-to-Agent (A2A) protocol** via REST:
 
 ## 📊 API Endpoints
 
-### Master Agent API (Port 8000)
+### Master Agent API (Port 9000)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -151,7 +151,7 @@ The Master Agent uses **Agent-to-Agent (A2A) protocol** via REST:
 ### Swagger Documentation
 
 Once server is running:
-- **Swagger UI**: `http://localhost:8000/docs`
+- **Swagger UI**: `http://localhost:9000/docs`
 - **ReDoc**: `http://localhost:8000/redoc`
 
 ## 🔧 Development
@@ -187,11 +187,11 @@ Then restart the server.
 
 ### Server won't start
 
-**Problem**: Port 8000 already in use
+**Problem**: Port 9000 already in use
 ```bash
 # Find process using port
-netstat -ano | findstr :8000  # Windows
-lsof -i :8000                 # Mac/Linux
+netstat -ano | findstr :9000  # Windows
+lsof -i :9000                 # Mac/Linux
 
 # Kill process or change port in config
 ```
@@ -203,7 +203,7 @@ lsof -i :8000                 # Mac/Linux
 - Verify extension URL matches allowed origins
 
 **Problem**: Connection refused
-- Verify server is running: `curl http://localhost:8000/health`
+- Verify server is running: `curl http://localhost:9000/health`
 - Check firewall settings
 
 ### Agent communication fails

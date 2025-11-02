@@ -1,88 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Chat Assistant</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div class="chat-container">
-        <div class="chat-header">
-            <h1>AI Assistant</h1>
-            <button id="settingsBtn" class="settings-btn" aria-label="Settings">⚙️</button>
-        </div>
-        
-        <div class="payment-section">
-            <button id="paymentBtn" class="payment-btn">
-                <span class="payment-icon">💳</span>
-                <span class="payment-text">Buy Insurance</span>
-            </button>
-        </div>
-        
-        <div class="chat-messages" id="chatMessages">
-            <div class="welcome-message">
-                <div class="welcome-icon">🤖</div>
-                <h2>Welcome!</h2>
-                <p>Start a conversation with your AI assistant. Ask questions, get help, or just chat!</p>
-            </div>
-        </div>
-        
-        <div class="chat-input-container">
-            <textarea 
-                id="messageInput" 
-                placeholder="Type your message..." 
-                rows="1"
-                maxlength="2000"
-            ></textarea>
-            <button id="sendImageBtn" class="send-btn image-btn" aria-label="Send screenshot" title="Send screenshot of current tab">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                </svg>
-            </button>
-            <button id="sendBtn" class="send-btn" aria-label="Send message">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-            </button>
-        </div>
-    </div>
-
-    <!-- Settings Modal -->
-    <div id="settingsModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Settings</h2>
-                <button class="close-btn" id="closeSettings">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="temperature">Temperature:</label>
-                    <input 
-                        type="range" 
-                        id="temperature" 
-                        min="0" 
-                        max="2" 
-                        step="0.1" 
-                        value="0.7"
-                    >
-                    <div class="range-value">
-                        <span>0</span>
-                        <span id="tempValue">0.7</span>
-                        <span>2</span>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="saveSettings" class="primary-btn">Save Settings</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="sidepanel.js"></script>
-</body>
+    <script>
+      // Bridge script to handle insurance prompts from decision agent
+      // This listens for master agent responses and tries to inject them into the React chat app
+      (function() {
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
+          // Listen for messages from background script
+          chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            if (request.type === 'insurancePromptFromAgent' && request.message) {
+              // Wait for React app to load, then try to inject the message
+              const injectMessage = () => {
+                // Try multiple strategies to add message to chat
+                
+                // Strategy 1: Dispatch custom event
+                const event = new CustomEvent('insurancePromptFromAgent', {
+                  detail: {
+                    message: request.message,
+                    url: request.url,
+                    title: request.title,
+                    travel_context: request.travel_context,
+                    timestamp: request.timestamp
+                  }
+                });
+                window.dispatchEvent(event);
+                
+                // Strategy 2: Try to find React root and trigger message handler
+                // This assumes the React app has a global message handler or state setter
+                setTimeout(() => {
+                  // Look for React devtools hook
+                  if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+                    const roots = window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers;
+                    if (roots && roots.size > 0) {
+                      // React app is loaded, try to trigger message
+                      const event2 = new CustomEvent('addChatMessage', {
+                        detail: {
+                          text: request.message,
+                          sender: 'assistant'
+                        }
+                      });
+                      window.dispatchEvent(event2);
+                    }
+                  }
+                }, 1000);
+              };
+              
+              // If DOM is ready, inject immediately, otherwise wait
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', injectMessage);
+              } else {
+                // Wait a bit for React to load
+                setTimeout(injectMessage, 500);
+              }
+            }
+          });
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="./sidepanel.js"></script>
+    <link rel="stylesheet" crossorigin href="./main.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>
-
+  

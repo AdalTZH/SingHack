@@ -1,15 +1,16 @@
 # Singhacks - Travel Insurance Risk & Prediction System
 
-A comprehensive travel insurance system with four AI agents that work together to assess travel risks, classify user queries, and recommend suitable insurance plans.
+A comprehensive travel insurance system with five AI agents that work together to assess travel risks, classify user queries, recommend suitable insurance plans, and analyze user browsing behavior.
 
 ## Overview
 
-This project consists of four main components:
+This project consists of five main components:
 
-1. **Master Agent** (NEW!) - Central orchestration agent that routes queries to specialized agents
-2. **Classifier Agent** - Classifies user queries into Comparison, Explanation, Eligibility, or Scenario Analysis
-3. **Risk Agent** - Identifies potential travel risks (weather, natural disasters, advisories)
-4. **Predict Agent** - Recommends insurance plans based on historical claims data
+1. **Master Agent** - Central orchestration agent that routes queries to specialized agents
+2. **Decision Agent** (NEW!) - Analyzes page sync data to determine if travel insurance should be offered
+3. **Classifier Agent** - Classifies user queries into Comparison, Explanation, Eligibility, or Scenario Analysis
+4. **Risk Agent** - Identifies potential travel risks (weather, natural disasters, advisories)
+5. **Predict Agent** - Recommends insurance plans based on historical claims data
 
 The Master Agent receives requests from a Chrome extension and coordinates with specialized agents via Agent-to-Agent (A2A) protocol. All agents also expose tools via MCP (Model Context Protocol) servers, making them accessible to AI assistants like Cursor.
 
@@ -24,6 +25,14 @@ singhacks/
 │   ├── config.py          # Configuration (ports, URLs)
 │   ├── requirements.txt   # Master agent dependencies
 │   └── README.md          # Master Agent documentation
+├── decision_agent/        # Decision Agent Package (Page Sync Analysis)
+│   ├── server.py          # FastAPI server for page sync analysis
+│   ├── decision_agent.py  # Decision-making logic with LLM
+│   ├── api.py             # API interface
+│   ├── config.py          # Configuration (ports, URLs)
+│   ├── requirements.txt   # Decision agent dependencies
+│   ├── README.md          # Decision Agent documentation
+│   └── QUICKSTART.md      # Quick start guide
 ├── classifier_agent/      # Classifier Agent Package
 │   ├── mcp_server.py      # MCP server with 3 query classification tools
 │   ├── classifier_agent.py # Main classification logic with LangGraph
@@ -129,7 +138,27 @@ After configuring MCP servers, restart Cursor to load them.
 
 ## Agents
 
-### Master Agent (NEW!)
+### Decision Agent (NEW!)
+
+Analyzes page sync data from Chrome extension to determine if travel insurance should be offered:
+
+- **FastAPI Server**: Receives page sync data from Chrome extension
+- **LLM-Powered Decisions**: Uses OpenAI models to analyze page content
+- **Automatic Forwarding**: Forwards insurance prompts to Master Agent when appropriate
+
+**Key Features:**
+- Analyzes all page content via LLM to determine if travel-related
+- Decides if insurance might be needed based on travel activity
+- Automatically forwards insurance prompts to Master Agent
+- Provides decision confidence scores and reasoning
+
+**API Endpoints:**
+- `POST /analyze` - Analyze page sync data and determine if insurance should be offered
+- `GET /health` - Health check
+
+**Documentation:** See `decision_agent/README.md` and `decision_agent/QUICKSTART.md`
+
+### Master Agent
 
 Central orchestration agent that routes queries and synthesizes responses:
 
@@ -229,24 +258,30 @@ python -m predict_agent.example_usage
 python -m risk_agent.example_usage
 ```
 
-### Using via Chrome Extension (NEW!)
+### Using via Chrome Extension
 
-The Master Agent is designed to work with the Chrome extension:
+The system works with the Chrome extension:
 
-1. **Start Master Agent Server**:
+1. **Start Required Servers**:
 ```bash
+# Terminal 1: Master Agent (port 9000)
 cd Server
 python -m master_agent.server
+
+# Terminal 2: Decision Agent (port 8004) - Required for page sync
+cd Server
+python -m decision_agent.server
 ```
 
 2. **Configure Extension**:
    - Set `USE_MASTER_AGENT: true` in `Extension/config.js`
-   - Extension will send requests to `http://localhost:8000/chat`
+   - Ensure `DECISION_AGENT_URL` and `MASTER_AGENT_URL` are set
+   - Extension will send chat requests to Master Agent and page sync to Decision Agent
 
-3. **Chat with the System**:
-   - Open the extension sidebar
-   - Ask questions about travel insurance
-   - Master Agent routes to appropriate specialized agents
+3. **Use the System**:
+   - **Chat**: Open the extension sidebar and ask questions about travel insurance
+   - **Page Sync**: When enabled, Decision Agent automatically analyzes browsing and prompts for insurance when appropriate
+   - Master Agent routes queries to appropriate specialized agents
    - Receive synthesized responses
 
 ### Using via MCP (Cursor AI Assistant)

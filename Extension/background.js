@@ -31,6 +31,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         return true; // Indicates we'll send a response asynchronously
     }
+    
+    if (request.type === 'speech-to-text') {
+        handleSpeechToText(request)
+            .then(response => sendResponse(response))
+            .catch(error => {
+                console.error('Speech-to-text error:', error);
+                sendResponse({ success: false, error: error.message || 'Speech transcription failed' });
+            });
+        return true; // Indicates we'll send a response asynchronously
+    }
 });
 
 // Handle chat message - supports both Master Agent and direct OpenAI
@@ -47,6 +57,44 @@ async function handleChatMessage(request) {
     }
 }
 
+// Handle speech-to-text conversion
+async function handleSpeechToText(request) {
+    const { audio_data, format } = request;
+    
+    try {
+        const masterAgentUrl = CONFIG.MASTER_AGENT_URL || 'http://localhost:9000';
+        
+        const response = await fetch(`${masterAgentUrl}/speech-to-text`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                audio_data: audio_data,
+                format: format || 'webm'
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Speech-to-text returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            return {
+                success: true,
+                text: data.text
+            };
+        } else {
+            throw new Error(data.error || 'Speech-to-text returned error');
+        }
+    } catch (error) {
+        console.error('Speech-to-text error:', error);
+        throw error;
+    }
+}
+
 // Handle chat message via Master Agent
 async function handleMasterAgentChat(request) {
     const { message, temperature, image } = request;
@@ -57,7 +105,7 @@ async function handleMasterAgentChat(request) {
             throw new Error('Image analysis not yet supported in Master Agent mode');
         }
         
-        const masterAgentUrl = CONFIG.MASTER_AGENT_URL || 'http://localhost:8000';
+        const masterAgentUrl = CONFIG.MASTER_AGENT_URL || 'http://localhost:9000';
         
         const response = await fetch(`${masterAgentUrl}/chat`, {
             method: 'POST',
@@ -322,44 +370,31 @@ async function extractPageHtml(tabId) {
 }
 
 /**
- * Send page data to OpenAI API with exponential backoff retry logic
- * This function sends the FULL WEBPAGE HTML to OpenAI for analysis.
+ * Send page data to Decision Agent for analysis
+ * The Decision Agent determines if the page is travel-related and if insurance might be needed.
+ * If insurance is needed, the Decision Agent automatically forwards a prompt to the Master Agent.
  * @param {Object} pageData - The page data to send (includes full HTML content)
  * @param {number} retryCount - Current retry attempt (starts at 0)
  */
-async function sendToOpenAI(pageData, retryCount = 0) {
-    const apiKey = CONFIG.OPENAI_API_KEY;
-    
-    if (!apiKey || apiKey === 'YOUR_API_KEY_HERE' || !apiKey.startsWith('sk-')) {
-        console.error('Invalid API key for page sync');
-        return;
-    }
+async function sendToDecisionAgent(pageData, retryCount = 0) {
+    const decisionAgentUrl = CONFIG.DECISION_AGENT_URL || 'http://localhost:8004';
     
     try {
-        // Sends the complete webpage HTML content to OpenAI
-        // The HTML is truncated to HTML_SIZE_LIMIT (200k chars) if needed to fit API limits
-        // For the explanation request, we send up to 100k chars to OpenAI
-        // This includes ALL page content: HTML structure, text, metadata, etc.
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        // Send page data to Decision Agent for analysis
+        // The Decision Agent will:
+        // 1. Analyze if page is travel-related
+        // 2. Determine if insurance might be needed
+        // 3. Automatically forward to Master Agent if insurance should be prompted
+        const response = await fetch(`${decisionAgentUrl}/analyze`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are a user companion and your task is to assist the user when they are viewing a webpage and help them summarize the content of the webpage. The details should be concise and to the point.'
-                    },
-                    {
-                        role: 'user',
-                        content: `Please provide a detailed summary of the content of the following webpage:\n\nURL: ${pageData.url}\nTitle: ${pageData.title}\n\nPage HTML content:\n${pageData.html.substring(0, 100000)}${pageData.html.length > 100000 ? '\n[... content truncated for API limits ...]' : ''}`
-                    }
-                ],
-                max_tokens: 2000,
-                temperature: 0.7
+                url: pageData.url,
+                title: pageData.title,
+                html_content: pageData.html,
+                timestamp: pageData.timestamp
             })
         });
         
@@ -368,7 +403,19 @@ async function sendToOpenAI(pageData, retryCount = 0) {
         }
         
         const data = await response.json();
-        const explanation = data.choices[0]?.message?.content?.trim() || 'Unable to generate explanation';
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Decision Agent returned error');
+        }
+        
+        // Log the decision result
+        console.log('Decision Agent analysis:', {
+            should_prompt: data.should_prompt,
+            confidence: data.confidence,
+            is_travel_related: data.is_travel_related,
+            insurance_needed: data.insurance_needed,
+            forwarded_to_master: data.forwarded_to_master
+        });
         
         // Success - update last sent log
         const timestamp = new Date().toLocaleString();
@@ -390,33 +437,54 @@ async function sendToOpenAI(pageData, retryCount = 0) {
             // Ignore message errors
         }
         
-        // Send detailed explanation to sidepanel chatbot interface
-        try {
-            chrome.runtime.sendMessage({
-                type: 'pageExplanation',
-                url: pageData.url,
-                title: pageData.title,
-                explanation: explanation,
-                timestamp: timestamp
-            }).catch(() => {
-                // Sidepanel might not be open, ignore error
-            });
-        } catch (e) {
-            // Ignore message errors
+        // If insurance prompt was forwarded, send master agent response to sidepanel chat
+        // This displays the master agent's response (not the decision agent's) in the chat interface
+        if (data.forwarded_to_master && data.should_prompt && data.master_agent_response) {
+            try {
+                // Send the master agent's response as a normal assistant message to display in chat
+                chrome.runtime.sendMessage({
+                    type: 'insurancePromptFromAgent',
+                    message: data.master_agent_response, // This is the master agent's response text
+                    url: pageData.url,
+                    title: pageData.title,
+                    travel_context: data.travel_context,
+                    timestamp: timestamp,
+                    source: 'master_agent' // Indicates this came from the master agent
+                }).catch(() => {
+                    // Sidepanel might not be open, ignore error
+                });
+            } catch (e) {
+                // Ignore message errors
+                console.error('Error sending master agent response to sidepanel:', e);
+            }
         }
         
     } catch (error) {
-        console.error(`Error sending to OpenAI (attempt ${retryCount + 1}):`, error);
+        const isNetworkError = error.message.includes('Failed to fetch') || 
+                               error.message.includes('NetworkError') ||
+                               error.name === 'TypeError';
+        
+        if (isNetworkError && retryCount === 0) {
+            // First attempt failed - check if server is running
+            console.error('❌ Decision Agent server not reachable. Please ensure the server is running:');
+            console.error(`   Expected URL: ${decisionAgentUrl}`);
+            console.error(`   Start server with: cd Server/decision_agent && python -m decision_agent.server`);
+            console.error(`   Or check: ${decisionAgentUrl}/health`);
+        } else {
+            console.error(`Error sending to Decision Agent (attempt ${retryCount + 1}):`, error);
+        }
         
         // Exponential backoff retry logic
         if (retryCount < MAX_RETRIES) {
             const backoffDelay = INITIAL_BACKOFF_MS * Math.pow(2, retryCount);
             console.log(`Retrying in ${backoffDelay}ms...`);
             setTimeout(() => {
-                sendToOpenAI(pageData, retryCount + 1);
+                sendToDecisionAgent(pageData, retryCount + 1);
             }, backoffDelay);
         } else {
-            console.error('Max retries reached. Failed to send page data to OpenAI.');
+            console.error('❌ Max retries reached. Failed to send page data to Decision Agent.');
+            console.error('   Make sure Decision Agent server is running on', decisionAgentUrl);
+            console.error('   See Server/decision_agent/QUICKSTART.md for setup instructions');
         }
     }
 }
@@ -482,7 +550,7 @@ async function handleTabChange(tabId, changeInfo, tab) {
             }
             
             // Prepare page data with minimal metadata
-            // NOTE: The full webpage HTML is included here and sent to OpenAI
+            // NOTE: The full webpage HTML is included here and sent to Decision Agent
             const pageData = {
                 url: tab.url,
                 title: tab.title || 'Untitled',
@@ -490,9 +558,10 @@ async function handleTabChange(tabId, changeInfo, tab) {
                 html: html  // Full webpage HTML content (truncated to HTML_SIZE_LIMIT if needed)
             };
             
-            // Send webpage HTML to OpenAI for detailed explanation
-            // This includes the entire page content sent to OpenAI's API
-            await sendToOpenAI(pageData);
+            // Send webpage HTML to Decision Agent for analysis
+            // Decision Agent will determine if travel-related and if insurance is needed
+            // If yes, it will automatically forward to Master Agent for insurance prompt
+            await sendToDecisionAgent(pageData);
             
         } catch (error) {
             console.error('Error processing tab change:', error);

@@ -117,12 +117,61 @@
         .open-sidepanel-btn:hover {
             background-color: #0056b3;
         }
+        .singpass-section {
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .singpass-section h3 {
+            color: #333;
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .singpass-section p {
+            color: #666;
+            margin: 0 0 16px 0;
+            font-size: 12px;
+        }
+        .qr-code-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+        .qr-code-wrapper {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .singpass-logo-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 12px;
+        }
+        .singpass-logo {
+            height: 32px;
+            width: auto;
+        }
     </style>
 </head>
 <body>
     <div class="popup-header">
         <h2>Page Sync Settings</h2>
         <p>Control automatic page content synchronization</p>
+    </div>
+    
+    <div class="singpass-section">
+        <h3>Verify Your Identity</h3>
+        <p>Scan with Singpass to authenticate</p>
+        <div class="qr-code-container">
+            <div class="qr-code-wrapper">
+                <img src="qr-code.svg" alt="QR Code" width="150" height="150" />
+            </div>
+        </div>
+        <div class="singpass-logo-container">
+            <img src="icons/singpass_logo_fullcolour.png" alt="Singpass" class="singpass-logo" />
+        </div>
     </div>
     
     <div class="consent-section">

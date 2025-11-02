@@ -249,16 +249,12 @@ class MasterAgent:
         logger.info(f"Calling Risk Agent for: {user_query}")
         
         try:
-            # Import locally to avoid circular dependencies
-            from risk_agent import RiskAgent
-            
-            risk_agent = RiskAgent()
-            
-            # For now, return a placeholder response
-            # In production, this would call risk assessment methods
+            # Risk Agent is MCP-based, return placeholder for now
+            # In production, this would use the MCP tools or API
             result = {
                 'message': 'Risk Agent: Travel risk assessment based on location and dates.',
-                'risks': []
+                'risks': [],
+                'note': 'Risk assessment capabilities available via MCP tools'
             }
             
             logger.info(f"Risk assessment result: {result}")

@@ -15,7 +15,7 @@ A complete **Master Agent orchestration system** that integrates Chrome Extensio
                        ↓
 ┌─────────────────────────────────────────────────────────┐
 │              Master Agent (FastAPI)                     │
-│  Port: 8000 | LangGraph Orchestration                  │
+│  Port: 9000 | LangGraph Orchestration                  │
 │  ├─ Route Query                                         │
 │  ├─ Synthesize Response                                 │
 │  └─ Agent Coordination                                  │
@@ -44,7 +44,7 @@ A complete **Master Agent orchestration system** that integrates Chrome Extensio
 - **`QUICKSTART.md`** - Quick start guide
 
 #### Key Features:
-✅ **FastAPI Server** on port 8000
+✅ **FastAPI Server** on port 9000
 ✅ **LangGraph Workflow** for intelligent routing
 ✅ **REST API** for Chrome extension
 ✅ **CORS Support** for browser requests
@@ -85,7 +85,7 @@ A complete **Master Agent orchestration system** that integrates Chrome Extensio
 
 ### Request Flow:
 1. **User types message** in Chrome extension sidebar
-2. **Extension sends** `POST http://localhost:8000/chat`
+2. **Extension sends** `POST http://localhost:9000/chat`
 3. **Master Agent** receives in `server.py`
 4. **LangGraph workflow** (master_agent.py):
    - Route query → Analyze keywords
@@ -142,8 +142,8 @@ cd Server
 python -m master_agent.server
 
 # In another terminal
-curl http://localhost:8000/health
-curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" -d '{"message": "test"}'
+curl http://localhost:9000/health
+curl -X POST http://localhost:9000/chat -H "Content-Type: application/json" -d '{"message": "test"}'
 ```
 
 ### Test Chrome Extension:

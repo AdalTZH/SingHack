@@ -60,7 +60,7 @@ python -m master_agent.server
 Or using uvicorn directly:
 
 ```bash
-uvicorn master_agent.server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn master_agent.server:app --host 0.0.0.0 --port 9000 --reload
 ```
 
 ## API Endpoints
@@ -205,7 +205,7 @@ logging.basicConfig(level=logging.DEBUG)
 Key configuration options in `config.py`:
 
 - `SERVER_HOST`: Server bind address (default: 0.0.0.0)
-- `SERVER_PORT`: Server port (default: 8000)
+- `SERVER_PORT`: Server port (default: 9000)
 - `OPENAI_MODEL`: LLM model for synthesis (default: gpt-4o-mini)
 - `TEMPERATURE`: Response creativity (default: 0.7)
 - `AGENT_URLS`: Base URLs for specialized agents
@@ -238,7 +238,7 @@ Key configuration options in `config.py`:
 
 ### Server Won't Start
 
-1. Check if port 8000 is available
+1. Check if port 9000 is available
 2. Verify OpenAI API key is set
 3. Ensure all dependencies are installed
 

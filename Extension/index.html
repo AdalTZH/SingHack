@@ -1,0 +1,41 @@
+
+  <!DOCTYPE html>
+  <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>SINGHACK Chrome extention</title>
+      <script>
+        // Bridge script to handle master agent responses from decision agent
+        // This listens for insurance prompts and dispatches custom events for the React app
+        (function() {
+          if (typeof chrome !== 'undefined' && chrome.runtime) {
+            chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+              if (request.type === 'insurancePromptFromAgent' && request.message) {
+                // Dispatch custom event with master agent's response
+                // The React app should listen for this event to display the message
+                const event = new CustomEvent('insurancePromptFromAgent', {
+                  detail: {
+                    message: request.message, // Master agent's response text
+                    url: request.url,
+                    title: request.title,
+                    travel_context: request.travel_context,
+                    timestamp: request.timestamp,
+                    source: 'master_agent'
+                  }
+                });
+                window.dispatchEvent(event);
+              }
+            });
+          }
+        })();
+      </script>
+      <script type="module" crossorigin src="./assets/index-BMqyYwNR.js"></script>
+      <link rel="stylesheet" crossorigin href="./assets/index-Bj1OQuhj.css">
+    </head>
+
+    <body>
+      <div id="root"></div>
+    </body>
+  </html>
+  

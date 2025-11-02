@@ -1,4 +1,4 @@
-/* Fix for chat UI - prevent message overlap with input field */
+/* Fix for chat UI - prevent message overlap with input field and fix scrolling */
 
 /* Target the specific chat messages container that has overflow-y-auto px-6 py-6 classes */
 /* The Tailwind classes are space-separated in a single class attribute */
@@ -16,5 +16,143 @@ div[class*="overflow-y-auto"][class*="px-6"] {
 div.chat-messages,
 div.messages {
     padding-bottom: 120px !important;
+}
+
+/* CRITICAL FIX: Prevent background and input from moving up */
+html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 100% !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    position: relative !important;
+}
+
+/* Create a fixed background layer that never moves */
+body::before {
+    content: '' !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    background-attachment: fixed !important;
+    background-size: cover !important;
+    z-index: -9999 !important;
+    pointer-events: none !important;
+}
+
+/* Also add to html as fallback */
+html::before {
+    content: '' !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    z-index: -9999 !important;
+    pointer-events: none !important;
+}
+
+body {
+    background: transparent !important;
+    overflow: hidden !important;
+    position: relative !important;
+}
+
+/* Ensure app and chat-container don't have backgrounds that override */
+.app,
+.chat-container {
+    background: transparent !important;
+    position: relative !important;
+}
+
+/* Fix any element with gradient background - make them transparent so fixed pseudo-element shows */
+*[style*="gradient"],
+*[class*="gradient"] {
+    background: transparent !important;
+}
+
+#root {
+    height: 100% !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    position: relative !important;
+    display: block !important;
+}
+
+.app {
+    height: 100% !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    position: relative !important;
+    z-index: 1 !important;
+    background: transparent !important;
+}
+
+#root {
+    height: 100% !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    position: relative !important;
+    display: block !important;
+    background: transparent !important;
+    z-index: 0 !important;
+}
+
+.chat-container {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    position: relative !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    z-index: 1 !important;
+    background: transparent !important;
+}
+
+.messages,
+.chat-messages {
+    flex: 1 1 0% !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    min-height: 0 !important;
+    position: relative !important;
+    will-change: scroll-position !important;
+}
+
+.chat-input {
+    flex-shrink: 0 !important;
+    flex-grow: 0 !important;
+    position: relative !important;
+    z-index: 10 !important;
+    width: 100% !important;
+    margin-top: auto !important;
+}
+
+/* Fixed background element */
+.fixed-background {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    z-index: -1 !important;
+    pointer-events: none !important;
+    will-change: transform !important;
 }
 

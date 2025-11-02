@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { InsurancePromptListener } from './InsurancePromptListener';
+import { MessageContent } from './components/MessageContent';
 
 // Message interface
 interface Message {
@@ -89,6 +90,9 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* Fixed background layer */}
+      <div className="fixed-background"></div>
+      
       {/* Add Insurance Prompt Listener - handles automatic insurance prompts */}
       <InsurancePromptListener onMessageReceived={handleInsurancePrompt} />
 
@@ -98,7 +102,7 @@ export default function App() {
           <div className="messages">
             {messages.map(msg => (
               <div key={msg.id} className={`message ${msg.sender}`}>
-                <div className="message-content">{msg.text}</div>
+                <MessageContent text={msg.text} sender={msg.sender} />
               </div>
             ))}
             {isLoading && (

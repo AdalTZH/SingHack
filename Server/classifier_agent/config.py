@@ -26,9 +26,9 @@ CLASSIFICATION_TYPES = [
 
 # Product name mappings
 PRODUCT_NAMES = {
-    'Product A': 'Scootsurance Travel Insurance',
-    'Product B': 'COVID-19 COVER (TravelEasy)',
-    'Product C': 'TravelEasy / TravelEasy Pre-Ex'
+    'Product A': 'Scootsurance',
+    'Product B': 'TravelEasy Policy',
+    'Product C': 'TravelEasy Pre-Ex Policy'
 }
 
 # Classification keywords and patterns

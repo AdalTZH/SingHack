@@ -202,10 +202,17 @@ async def analyze_page_sync(request: PageSyncRequest):
                         forwarded = True
                         master_response_data = master_response.json()
                         master_agent_response = master_response_data.get('response', '')
-                        logger.info("Successfully forwarded insurance prompt to master agent")
-                        logger.info(f"Master agent response: {master_agent_response[:100]}...")
+                        
+                        if not master_agent_response:
+                            logger.warning("Master agent response is empty!")
+                            logger.warning(f"Master agent response data: {master_response_data}")
+                        else:
+                            logger.info("Successfully forwarded insurance prompt to master agent")
+                            logger.info(f"Master agent response length: {len(master_agent_response)}")
+                            logger.info(f"Master agent response preview: {master_agent_response[:200]}...")
                     else:
-                        logger.warning(f"Master agent returned {master_response.status_code}")
+                        error_text = master_response.text if hasattr(master_response, 'text') else 'Unknown error'
+                        logger.warning(f"Master agent returned {master_response.status_code}: {error_text}")
             
             except Exception as e:
                 logger.error(f"Error forwarding to master agent: {e}")

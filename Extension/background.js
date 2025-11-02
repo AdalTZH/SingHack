@@ -438,25 +438,51 @@ async function sendToDecisionAgent(pageData, retryCount = 0) {
         }
         
         // If insurance prompt was forwarded, send master agent response to sidepanel chat
-        // This displays the master agent's response (not the decision agent's) in the chat interface
+        // Format it exactly like a normal chat response so React app handles it the same way
+        console.log('Decision Agent result:', {
+            forwarded_to_master: data.forwarded_to_master,
+            should_prompt: data.should_prompt,
+            has_response: !!data.master_agent_response,
+            response_length: data.master_agent_response?.length || 0,
+            travel_context: data.travel_context
+        });
+        
         if (data.forwarded_to_master && data.should_prompt && data.master_agent_response) {
             try {
-                // Send the master agent's response as a normal assistant message to display in chat
-                chrome.runtime.sendMessage({
-                    type: 'insurancePromptFromAgent',
-                    message: data.master_agent_response, // This is the master agent's response text
+                console.log('Sending master agent response as chat message:', {
+                    message_preview: data.master_agent_response.substring(0, 100),
                     url: pageData.url,
-                    title: pageData.title,
-                    travel_context: data.travel_context,
-                    timestamp: timestamp,
-                    source: 'master_agent' // Indicates this came from the master agent
-                }).catch(() => {
-                    // Sidepanel might not be open, ignore error
+                    title: pageData.title
+                });
+                
+                // Send as a 'chatResponse' type - same format as normal chat responses
+                // This way the React app can handle it exactly like a normal chat message
+                chrome.runtime.sendMessage({
+                    type: 'chatResponse',
+                    message: data.master_agent_response, // Master agent's response text
+                    metadata: {
+                        source: 'decision_agent',
+                        url: pageData.url,
+                        title: pageData.title,
+                        travel_context: data.travel_context,
+                        timestamp: timestamp
+                    }
+                }).then((response) => {
+                    console.log('✅ Successfully sent insurance prompt as chat response', response);
+                }).catch((error) => {
+                    console.error('❌ Error sending insurance prompt:', error);
+                    // Sidepanel might not be open - this is normal if user hasn't opened it yet
+                    // The message will be queued and delivered when sidepanel opens
                 });
             } catch (e) {
-                // Ignore message errors
-                console.error('Error sending master agent response to sidepanel:', e);
+                console.error('❌ Error sending master agent response to sidepanel:', e);
             }
+        } else {
+            console.log('⚠️ Not sending to sidepanel - missing conditions:', {
+                forwarded_to_master: data.forwarded_to_master,
+                should_prompt: data.should_prompt,
+                has_response: !!data.master_agent_response
+            });
         }
         
     } catch (error) {

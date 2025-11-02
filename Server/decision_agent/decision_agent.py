@@ -41,6 +41,50 @@ class DecisionAgent:
             temperature=TEMPERATURE
         )
     
+    def _is_stripe_payment_page(self, url: str, title: str, html_content: str) -> bool:
+        """
+        Check if the current page is a Stripe payment/checkout page
+        
+        Args:
+            url: Page URL
+            title: Page title
+            html_content: Page HTML content
+            
+        Returns:
+            True if this is a Stripe payment page
+        """
+        url_lower = url.lower()
+        title_lower = title.lower()
+        content_lower = html_content.lower()[:1000]  # Check first 1000 chars for speed
+        
+        # Stripe URL patterns
+        stripe_domains = [
+            'checkout.stripe.com',
+            'js.stripe.com',
+            'pay.stripe.com',
+            'stripe.com/checkout',
+            'stripe.com/pay',
+            'stripe.com/c/pay',
+        ]
+        
+        # Check URL for Stripe domains
+        is_stripe_url = any(domain in url_lower for domain in stripe_domains)
+        
+        # Check for Stripe-specific content
+        stripe_indicators = [
+            'stripe',
+            'checkout.stripe.com',
+            'payment_intent',
+            'payment_method',
+            'stripe checkout',
+            'pay with card',
+        ]
+        
+        combined_text = f"{url_lower} {title_lower} {content_lower}"
+        has_stripe_content = any(indicator in combined_text for indicator in stripe_indicators)
+        
+        return is_stripe_url or has_stripe_content
+    
     def _quick_filter(self, page_content: str, url: str, title: str) -> bool:
         """
         Quick keyword-based filter to determine if page might be travel-related
@@ -76,6 +120,22 @@ class DecisionAgent:
         """
         logger.info(f"Analyzing page with LLM: {title} ({url})")
         
+        # Early exit: Skip analysis if user is on Stripe payment page
+        # They're already purchasing insurance, no need to prompt again
+        if self._is_stripe_payment_page(url, title, html_content):
+            logger.info(f"Skipping insurance prompt - user is on Stripe payment page: {url}")
+            return {
+                'should_prompt': False,
+                'confidence': 1.0,
+                'reasoning': 'User is on Stripe payment/checkout page - already purchasing insurance',
+                'is_travel_related': False,
+                'insurance_needed': False,
+                'travel_context': '',
+                'url': url,
+                'title': title,
+                'skipped_reason': 'stripe_payment_page'
+            }
+        
         # Always use LLM for analysis - send HTML content to LLM for decision making
         # Truncate HTML to reasonable size for API (increase limit since we're always using LLM)
         html_truncated = html_content[:10000]  # Increased to 10k chars for better analysis
@@ -88,6 +148,8 @@ Your task is to make a DECISION, not generate summaries. Analyze the page HTML c
 1. Is this page travel-related? (flights, hotels, travel bookings, destinations, travel activities, etc.)
 2. Does this travel activity/booking potentially need insurance coverage? (international travel, adventure activities, expensive trips, cancellable bookings, etc.)
 
+IMPORTANT: If this is a payment page, checkout page, or the user is already purchasing insurance, set should_prompt to false. Do not prompt users who are already in the process of making a purchase.
+
 Page Information:
 URL: {url}
 Title: {title}
@@ -99,7 +161,7 @@ Page HTML Content:
 Based on this analysis, determine:
 - Is this travel-related? (yes/no)
 - Could this travel activity benefit from insurance? (yes/no)
-- Should the user be prompted about insurance purchase? (yes/no)
+- Should the user be prompted about insurance purchase? (yes/no - MUST be false if user is already on payment/checkout page)
 
 Respond in this EXACT JSON format:
 {{
@@ -197,9 +259,9 @@ Page: {title}
 URL: {url}
 
 The user is viewing a travel-related page and may benefit from travel insurance coverage. 
-Please provide a helpful, non-intrusive prompt suggesting they consider travel insurance for their upcoming trip.
+Please provide a SHORT, CONCISE prompt (maximum 2 sentences, under 100 words) suggesting travel insurance.
 
-Be concise, friendly, and helpful. Offer to provide more information about suitable travel insurance plans."""
+Keep it brief and friendly. Focus on the value of coverage for their trip type."""
         
         return prompt
 

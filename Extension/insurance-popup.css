@@ -1,0 +1,142 @@
+/**
+ * Insurance Prompt Popup Styles
+ * Simple, non-intrusive popup notification for insurance prompts
+ */
+
+.insurance-prompt-popup {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  max-width: 400px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  animation: slideInUp 0.3s ease-out;
+  color: white;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.insurance-prompt-popup.hide {
+  animation: slideOutDown 0.3s ease-out forwards;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutDown {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+}
+
+.insurance-prompt-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.insurance-prompt-popup-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.insurance-prompt-popup-title::before {
+  content: '🛡️';
+  font-size: 20px;
+}
+
+.insurance-prompt-popup-close {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.2s;
+  padding: 0;
+}
+
+.insurance-prompt-popup-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.insurance-prompt-popup-message {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 12px 0;
+  opacity: 0.95;
+}
+
+.insurance-prompt-popup-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.insurance-prompt-popup-button {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.insurance-prompt-popup-button.primary {
+  background: white;
+  color: #667eea;
+}
+
+.insurance-prompt-popup-button.primary:hover {
+  background: #f0f0f0;
+  transform: translateY(-1px);
+}
+
+.insurance-prompt-popup-button.secondary {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.insurance-prompt-popup-button.secondary:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+@media (max-width: 480px) {
+  .insurance-prompt-popup {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    max-width: none;
+  }
+}
+

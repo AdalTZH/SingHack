@@ -96,7 +96,9 @@ class ClassifierAgentAPI:
             'reasoning': result.get('reasoning', ''),
             'type_details': details,
             'entities': result.get('entities', {}),
-            'metadata': result.get('metadata', {})
+            'metadata': result.get('metadata', {}),
+            'recommended_product': result.get('recommended_product', 'Product A'),
+            'product_reasoning': result.get('product_reasoning', 'No reasoning provided')
         }
 
 

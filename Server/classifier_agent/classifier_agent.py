@@ -29,15 +29,19 @@ class ClassificationState(TypedDict):
     reasoning: str  # Reasoning for classification
     extracted_entities: Dict[str, Any]  # Extracted entities (products, benefits, etc.)
     metadata: Dict[str, Any]  # Additional metadata
+    recommended_product: Optional[str]  # Recommended product (Product A, B, or C)
+    product_reasoning: str  # Reasoning for product recommendation
 
 
 class ClassifierAgent:
     """
-    Agent that classifies user queries into one of four types:
+    Agent that classifies user queries into one of four types and recommends
+    the best insurance product (Product A, B, or C):
     - Comparison: Compare products/benefits
     - Explanation: Explain benefits/coverage
     - Eligibility: Check coverage eligibility
     - Scenario Analysis: Analyze hypothetical scenarios
+    - Product Recommendation: Recommends Product A, B, or C with reasoning
     """
     
     def __init__(self, model_name: Optional[str] = None):
@@ -70,12 +74,14 @@ class ClassifierAgent:
         graph_builder.add_node("extract_entities", self._extract_entities)
         graph_builder.add_node("classify_query", self._classify_query)
         graph_builder.add_node("validate_classification", self._validate_classification)
+        graph_builder.add_node("recommend_product", self._recommend_product)
         
         # Define edges
         graph_builder.add_edge(START, "extract_entities")
         graph_builder.add_edge("extract_entities", "classify_query")
         graph_builder.add_edge("classify_query", "validate_classification")
-        graph_builder.add_edge("validate_classification", END)
+        graph_builder.add_edge("validate_classification", "recommend_product")
+        graph_builder.add_edge("recommend_product", END)
         
         # Compile the graph
         return graph_builder.compile()
@@ -314,6 +320,122 @@ Respond with ONLY a JSON object in this format:
             'metadata': metadata
         }
     
+    def _recommend_product(self, state: ClassificationState) -> Dict[str, Any]:
+        """
+        Recommend which product (A, B, or C) is best suited for the user's needs
+        
+        Args:
+            state: Current state
+            
+        Returns:
+            Updated state with product recommendation and reasoning
+        """
+        query = state.get('query', '')
+        extracted_entities = state.get('extracted_entities', {})
+        classification = state.get('classification', '')
+        
+        logger.info(f"Recommending product for query: {query}")
+        
+        # Get product information from taxonomy
+        product_info_summary = self._get_product_summary()
+        
+        # Build product recommendation prompt
+        recommendation_prompt = f"""You are an expert insurance advisor. Based on the user's query, recommend which insurance product would be best suited for their needs.
+
+Available Products:
+{product_info_summary}
+
+User Query: "{query}"
+Query Classification: {classification}
+Extracted Entities: {extracted_entities}
+
+Based on the user's needs, concerns, or scenario described in their query, recommend ONE of these products:
+- Product A: {PRODUCT_NAMES.get('Product A', 'Unknown')}
+- Product B: {PRODUCT_NAMES.get('Product B', 'Unknown')}
+- Product C: {PRODUCT_NAMES.get('Product C', 'Unknown')}
+
+Consider:
+- The user's specific needs mentioned in the query
+- Benefits or coverage types they're asking about
+- Any conditions, scenarios, or concerns they've expressed
+- The query classification type (which indicates their intent)
+
+Respond with ONLY a JSON object in this format:
+{{
+    "recommended_product": "Product A | Product B | Product C",
+    "product_reasoning": "Detailed explanation of why this product is recommended based on the user's query and needs. Be specific about which aspects of their query led to this recommendation."
+}}"""
+        
+        try:
+            response = self.llm.invoke([
+                SystemMessage(content="You are an expert insurance advisor. Always respond with valid JSON. Provide clear, specific reasoning for your product recommendation."),
+                HumanMessage(content=recommendation_prompt)
+            ])
+            
+            # Parse JSON response
+            result = json.loads(response.content.strip())
+            
+            recommended_product = result.get('recommended_product', 'Product A')
+            product_reasoning = result.get('product_reasoning', 'No reasoning provided')
+            
+            # Validate product is one of A, B, or C
+            if recommended_product not in ['Product A', 'Product B', 'Product C']:
+                logger.warning(f"Invalid product recommendation: {recommended_product}, defaulting to Product A")
+                recommended_product = 'Product A'
+                product_reasoning = 'Default recommendation due to invalid response'
+            
+            logger.info(f"Recommended product: {recommended_product}")
+            
+            return {
+                'recommended_product': recommended_product,
+                'product_reasoning': product_reasoning
+            }
+        
+        except Exception as e:
+            logger.error(f"Error recommending product: {e}")
+            # Fallback recommendation
+            return {
+                'recommended_product': 'Product A',
+                'product_reasoning': f'Default recommendation due to error: {str(e)}'
+            }
+    
+    def _get_product_summary(self) -> str:
+        """
+        Get a summary of product information from taxonomy for recommendation
+        
+        Returns:
+            Formatted string with product information
+        """
+        try:
+            taxonomy_structure = self.taxonomy_loader.get_taxonomy_structure()
+            products = taxonomy_structure.get('products', [])
+            
+            summary = f"Products available in taxonomy: {', '.join(products) if products else 'Product A, Product B, Product C'}\n\n"
+            
+            # Get information about each product
+            for product_key in ['Product A', 'Product B', 'Product C']:
+                product_name = PRODUCT_NAMES.get(product_key, 'Unknown')
+                product_info = self.taxonomy_loader.get_product_info(product_key)
+                
+                summary += f"{product_key} ({product_name}): "
+                
+                if product_info and isinstance(product_info, dict):
+                    # Count how many benefits this product covers
+                    benefit_count = len([k for k, v in product_info.items() if v])
+                    summary += f"Available in taxonomy. Covers {benefit_count} benefit categories.\n"
+                else:
+                    summary += "Standard travel insurance product available.\n"
+            
+            return summary
+        
+        except Exception as e:
+            logger.warning(f"Error getting product summary: {e}")
+            # Return basic product info
+            summary = "Available Products:\n"
+            for product_key, product_name in PRODUCT_NAMES.items():
+                summary += f"- {product_key}: {product_name}\n"
+            return summary
+    
     def classify(self, query: str) -> Dict[str, Any]:
         """
         Main classification method
@@ -333,7 +455,9 @@ Respond with ONLY a JSON object in this format:
             'confidence': 0.0,
             'reasoning': '',
             'extracted_entities': {},
-            'metadata': {}
+            'metadata': {},
+            'recommended_product': None,
+            'product_reasoning': ''
         })
         
         return {
@@ -342,7 +466,9 @@ Respond with ONLY a JSON object in this format:
             'confidence': result['confidence'],
             'reasoning': result['reasoning'],
             'entities': result['extracted_entities'],
-            'metadata': result['metadata']
+            'metadata': result['metadata'],
+            'recommended_product': result.get('recommended_product', 'Product A'),
+            'product_reasoning': result.get('product_reasoning', 'No reasoning provided')
         }
 
 

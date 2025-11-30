@@ -145,3 +145,9 @@ Once both agents are running, try these queries with the Master Agent:
 - "I'm planning to go hiking in Japan, what are the risks?"
 - "Are there any travel advisories for Japan?"
 
+
+
+
+
+
+

@@ -1,0 +1,136 @@
+{
+  "node_counts": [
+    {
+      "label": "Claim",
+      "count": 72592
+    },
+    {
+      "label": "ClaimType",
+      "count": 26
+    },
+    {
+      "label": "LossType",
+      "count": 20
+    },
+    {
+      "label": "CauseOfLoss",
+      "count": 16
+    },
+    {
+      "label": "Destination",
+      "count": 12
+    }
+  ],
+  "relationship_counts": [
+    {
+      "relationship": "OCCURRED_IN",
+      "count": 72592
+    },
+    {
+      "relationship": "IS_TYPE",
+      "count": 72592
+    },
+    {
+      "relationship": "CAUSED_BY",
+      "count": 72592
+    },
+    {
+      "relationship": "HAS_LOSS_TYPE",
+      "count": 72592
+    }
+  ],
+  "top_destinations": [
+    {
+      "destination": "Thailand",
+      "claim_count": 16962
+    },
+    {
+      "destination": "Vietnam",
+      "claim_count": 15592
+    },
+    {
+      "destination": "China",
+      "claim_count": 13929
+    },
+    {
+      "destination": "Malaysia",
+      "claim_count": 13782
+    },
+    {
+      "destination": "Japan",
+      "claim_count": 6078
+    },
+    {
+      "destination": "Indonesia",
+      "claim_count": 3093
+    },
+    {
+      "destination": "Hong Kong",
+      "claim_count": 1703
+    },
+    {
+      "destination": "USA",
+      "claim_count": 519
+    },
+    {
+      "destination": "Australia",
+      "claim_count": 453
+    },
+    {
+      "destination": "UK",
+      "claim_count": 411
+    }
+  ],
+  "top_claim_types": [
+    {
+      "claim_type": "Medical Expenses",
+      "claim_count": 38745,
+      "total_paid": 16301069.0
+    },
+    {
+      "claim_type": "Delay/Disrupt/Miscon/Over",
+      "claim_count": 8883,
+      "total_paid": 2088345.0
+    },
+    {
+      "claim_type": "Baggage Loss",
+      "claim_count": 7197,
+      "total_paid": 1126013.0
+    },
+    {
+      "claim_type": "Cancel/Curtailment/Postpo",
+      "claim_count": 6048,
+      "total_paid": 3349927.0
+    },
+    {
+      "claim_type": "Damage",
+      "claim_count": 5689,
+      "total_paid": 372171.0
+    },
+    {
+      "claim_type": "Baggage Delayed",
+      "claim_count": 2954,
+      "total_paid": 1466146.0
+    },
+    {
+      "claim_type": "COVID-19",
+      "claim_count": 1350,
+      "total_paid": 556216.0
+    },
+    {
+      "claim_type": "Others",
+      "claim_count": 700,
+      "total_paid": 212183.0
+    },
+    {
+      "claim_type": "Money Loss",
+      "claim_count": 351,
+      "total_paid": 99185.0
+    },
+    {
+      "claim_type": "Personal Liability",
+      "claim_count": 219,
+      "total_paid": 13088.0
+    }
+  ]
+}

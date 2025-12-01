@@ -19,7 +19,7 @@ def scan_policy_eligibility(
     travelling_against_doctor_advice: bool = False,
     travelling_for_medical_treatment: bool = False,
     good_health: bool = True,
-    file_path: str = "./SingHack/Server/Taxonomy_Hackathon.json"
+    file_path: str = "./Server/Taxonomy_Hackathon.json"
 ) -> Dict[str, Any]:
     """
     Scans ALL policies and returns which ones the user is eligible for.

@@ -166,7 +166,7 @@
         <p>Scan with Singpass to authenticate</p>
         <div class="qr-code-container">
             <div class="qr-code-wrapper">
-                <img src="qr-code.svg" alt="QR Code" width="150" height="150" />
+                <img src="./src/assets/qr-code.svg" alt="QR Code" width="150" height="150" />
             </div>
         </div>
         <div class="singpass-logo-container">
@@ -179,6 +179,13 @@
             <label class="toggle-label" for="enableSync">Enable page-sync</label>
             <div class="toggle-switch" id="toggleSwitch" role="switch" aria-checked="false" tabindex="0">
                 <input type="checkbox" id="enableSync" style="display: none;" aria-label="Enable page sync">
+            </div>
+        </div>
+        
+        <div class="toggle-container">
+            <label class="toggle-label" for="enableCursorTextBox">Enable cursor textbox</label>
+            <div class="toggle-switch" id="cursorTextBoxToggle" role="switch" aria-checked="true" tabindex="0">
+                <input type="checkbox" id="enableCursorTextBox" style="display: none;" aria-label="Enable cursor textbox" checked>
             </div>
         </div>
         

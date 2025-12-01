@@ -1,158 +1,148 @@
-# AI Chat Assistant - Chrome Extension
+# SINGHACK Chrome Extension
 
-A modern, clean chatbot interface that lives in your browser's sidebar, now powered by a **Master Agent** orchestration system!
+A modern Chrome extension with AI chat assistant, page sync functionality, and SingPass authentication integration. The extension uses React with Vite for the frontend and a service worker for background tasks.
 
-## Features
+## 📋 Prerequisites
 
-- 🤖 **Modern UI**: Clean, gradient-based design with smooth animations
-- 💬 **Sidebar Chat**: Stays accessible while you browse
-- ⚙️ **Dual Mode**: Choose between Master Agent or direct OpenAI
-- 🧠 **Multi-Agent System**: Routes queries to specialized agents
-- 🔒 **Secure**: API key stored locally in Chrome's secure storage
-- 📱 **Responsive**: Works beautifully on all screen sizes
-- ⚡ **Fast**: Efficient message handling and real-time responses
+- Node.js 18+ and npm
+- Chrome browser (for testing)
+- OpenAI API key (for direct API mode) OR Master Agent backend running
+- Decision Agent backend (optional, for page sync feature)
 
-## Installation
+## 🚀 Setup Instructions
 
-### 1. Download or Clone
+### 1. Install Dependencies
+
 ```bash
-git clone <your-repo-url>
-cd SingHack
+npm install
 ```
 
-### 2. Load Extension in Chrome
+### 2. Configure API Keys
 
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in top-right corner)
-3. Click **Load unpacked**
-4. Select the `SingHack` folder
+Create or edit `config.js` in the Extension folder:
 
-### 3. Configure Your API
-
-Open `config.js` in a text editor and configure:
-
-**Option A: Use Master Agent (Recommended)**
 ```javascript
 const CONFIG = {
-    USE_MASTER_AGENT: true,
-    MASTER_AGENT_URL: 'http://localhost:9000',
-    OPENAI_API_KEY: 'your-key'  // Still needed for fallback
-};
-```
-
-**Option B: Direct OpenAI**
-```javascript
-const CONFIG = {
+    // Your OpenAI API key (get from https://platform.openai.com/api-keys)
+    OPENAI_API_KEY: 'sk-your-api-key-here',
+    
+    // Set to true to use Master Agent backend, false for direct OpenAI
     USE_MASTER_AGENT: false,
-    OPENAI_API_KEY: 'sk-your-actual-api-key-here'
+    
+    // Backend URLs (adjust if your servers run on different ports)
+    MASTER_AGENT_URL: 'http://localhost:9000',
+    DECISION_AGENT_URL: 'http://localhost:8004'
 };
 ```
 
-**Note**: If using Master Agent, ensure the server is running at `http://localhost:9000`.
+**⚠️ Important:** The `config.js` file is excluded from git (see `.gitignore`). Do not commit your API keys!
 
-### 4. Start the Master Agent Server (if using Master Agent mode)
+### 3. Development Mode
+
+Run the development server:
 
 ```bash
-cd Server
-python -m master_agent.server
+npm run dev
 ```
 
-### 5. Start Chatting
+This will start Vite on `http://localhost:3000` for development. Note: For Chrome extension development, you'll need to build and load the extension manually.
 
-The side panel will open when you click the extension icon. Start typing your message and press Enter or click Send!
+### 4. Build for Chrome Extension
 
-## Usage
+Build the extension for production:
 
-- **Open Sidebar**: Click the extension icon
-- **Send Message**: Type and press Enter or click the send button
-- **Settings**: Click the ⚙️ icon in the header
-- **Temperature**: Adjust creativity (0 = focused, 2 = creative)
-
-### Master Agent Mode vs Direct OpenAI
-
-**Master Agent Mode** (Recommended):
-- Queries routed through intelligent orchestration
-- Responses synthesized from specialized agents
-- Better context understanding
-- Multi-agent collaboration
-
-**Direct OpenAI Mode**:
-- Direct API calls to OpenAI
-- Faster for simple queries
-- Uses OpenAI credits directly
-
-## Project Structure
-
-```
-SingHack/
-├── manifest.json       # Extension configuration
-├── background.js       # Service worker for API calls
-├── config.js           # API key configuration (gitignored)
-├── sidepanel.html      # Chat interface HTML
-├── sidepanel.js        # Chat logic and UI handling
-├── styles.css          # Modern UI styles
-├── icons/              # Extension icons
-└── README.md           # This file
+```bash
+npm run build
 ```
 
-## Configuration
+This creates a `build/` folder with all necessary files:
+- Compiled React app
+- `manifest.json`
+- `background.js`
+- `config.js`
+- `popup.html` and `popup.js`
+- Icons folder
 
-Settings include:
+### 5. Load Extension in Chrome
 
-- **API Key**: Preconfigured in `config.js` (see Step 3 of Installation)
-- **Model**: GPT model to use (saved in Chrome's sync storage)
-- **Temperature**: Response randomness (0-2, saved in Chrome's sync storage)
+1. Open Chrome and go to `chrome://extensions/`
+2. Enable "Developer mode" (toggle in top right)
+3. Click "Load unpacked"
+4. Select the `Extension/build` folder
+5. The extension should now appear in your extensions list
 
-## API Key Security
+### 6. Using the Extension
 
-✅ **Secure Configuration**: Your API key is stored separately in `config.js` which is gitignored.
+- **Extension Icon**: Click the extension icon in the toolbar to open the popup (settings)
+- **Side Panel**: Click "Open Chat Assistant" in the popup, or the extension will automatically open the side panel
+- **Page Sync**: Enable page sync in the popup to allow automatic page content analysis
 
-- The `config.js` file is excluded from version control (.gitignore)
-- You can safely share the extension code without exposing your API key
-- Keep your `config.js` file private and never commit it
+## 📁 Project Structure
 
-## Troubleshooting
+```
+Extension/
+├── src/                    # React source files
+│   ├── components/        # React components
+│   ├── App.tsx            # Main app component
+│   └── main.tsx           # Entry point
+├── icons/                 # Extension icons
+├── background.js          # Service worker (background script)
+├── config.js              # Configuration (API keys, etc.)
+├── manifest.json          # Chrome extension manifest
+├── popup.html             # Extension popup HTML
+├── popup.js               # Extension popup JavaScript
+├── index.html             # Main app HTML
+├── vite.config.ts         # Vite configuration
+└── package.json           # Dependencies
+```
 
-**Side panel doesn't open:**
-- Make sure you're using Chrome version 114 or later
-- Try reloading the extension at `chrome://extensions/`
+## 🔧 Configuration
 
-**Messages aren't sending:**
-- Verify your API key is correctly set in `config.js`
-- Check that you have API credits in your OpenAI account
-- Look for error messages in the chat
-- Make sure `config.js` exists and contains a valid API key
+### API Modes
 
-**API errors:**
-- Ensure your API key has the right permissions
-- Check your OpenAI account billing status
-- Verify you're not exceeding rate limits
+The extension supports two modes:
 
-## Development
+1. **Direct OpenAI API** (`USE_MASTER_AGENT: false`)
+   - Requires OpenAI API key in `config.js`
+   - Directly calls OpenAI API
+   - Supports image analysis
 
-To modify the extension:
+2. **Master Agent Mode** (`USE_MASTER_AGENT: true`)
+   - Requires Master Agent backend running
+   - Forwards requests to Master Agent
+   - Image analysis not yet supported in this mode
 
-1. Make your changes to the source files
-2. Go to `chrome://extensions/`
-3. Click the **Reload** button on the extension card
-4. Test your changes
+### Page Sync Feature
 
-## Privacy
+The page sync feature monitors browser navigation and sends page content to the Decision Agent for analysis. This feature:
+- Only works when explicitly enabled by the user
+- Respects user privacy (requires opt-in)
+- Sends HTML content, URL, title, and timestamp
+- Can automatically prompt users about travel insurance needs
 
-- No data is collected or tracked
-- Conversations stay in your browser
-- API calls go directly to OpenAI
-- No third-party analytics
+## 🛠️ Development Notes
 
-## License
+- The React app runs in the side panel (loaded via `index.html`)
+- The background service worker handles API calls and page monitoring
+- The popup is a simple HTML/JS interface for settings
+- Build outputs go to `build/` folder (git-ignored)
 
-MIT License - feel free to use and modify!
+## 📝 TODO / Missing Components
 
-## Support
+The following components need to be created:
+- `InsurancePromptListener` - Listens for insurance prompts from Decision Agent
+- `MessageContent` - Component for rendering chat messages
 
-For issues or questions, please open an issue on GitHub.
+See `src/App.tsx` for TODO comments.
 
----
+## 🔒 Security Notes
 
-**Note**: This extension requires an active OpenAI API account and usage will be billed according to OpenAI's pricing.
+- Never commit `config.js` with real API keys
+- The extension requires `<all_urls>` permission for page sync feature
+- Page content is only sent when user explicitly enables page sync
 
+## 📚 Resources
+
+- [Chrome Extension Documentation](https://developer.chrome.com/docs/extensions/)
+- [Manifest V3 Guide](https://developer.chrome.com/docs/extensions/mv3/intro/)
+- Original Figma design: https://www.figma.com/design/haspyeA28e870B4kpSlbeH/SINGHACK-Chrome-extention

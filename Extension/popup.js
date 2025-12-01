@@ -3,6 +3,8 @@
 // DOM Elements
 const enableSyncCheckbox = document.getElementById('enableSync');
 const toggleSwitch = document.getElementById('toggleSwitch');
+const enableCursorTextBoxCheckbox = document.getElementById('enableCursorTextBox');
+const cursorTextBoxToggle = document.getElementById('cursorTextBoxToggle');
 const lastSentTime = document.getElementById('lastSentTime');
 const lastSentUrl = document.getElementById('lastSentUrl');
 const openSidepanelBtn = document.getElementById('openSidepanelBtn');
@@ -21,15 +23,22 @@ async function loadSettings() {
     try {
         const result = await chrome.storage.sync.get([
             'pageSyncEnabled',
+            'cursorTextBoxEnabled',
             'lastSentTime',
             'lastSentUrl'
         ]);
         
-        // Set checkbox state
+        // Set page sync checkbox state
         const isEnabled = result.pageSyncEnabled === true;
         enableSyncCheckbox.checked = isEnabled;
         toggleSwitch.classList.toggle('active', isEnabled);
         toggleSwitch.setAttribute('aria-checked', isEnabled);
+        
+        // Set cursor textbox checkbox state (default to true if not set)
+        const isCursorTextBoxEnabled = result.cursorTextBoxEnabled !== false;
+        enableCursorTextBoxCheckbox.checked = isCursorTextBoxEnabled;
+        cursorTextBoxToggle.classList.toggle('active', isCursorTextBoxEnabled);
+        cursorTextBoxToggle.setAttribute('aria-checked', isCursorTextBoxEnabled);
         
         // Update last sent log
         updateLastSentDisplay(result.lastSentTime, result.lastSentUrl);
@@ -43,7 +52,7 @@ async function loadSettings() {
  * Setup event listeners
  */
 function setupEventListeners() {
-    // Toggle switch click
+    // Page sync toggle switch click
     toggleSwitch.addEventListener('click', handleToggleClick);
     toggleSwitch.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -52,8 +61,20 @@ function setupEventListeners() {
         }
     });
     
-    // Checkbox change (sync with toggle)
+    // Page sync checkbox change (sync with toggle)
     enableSyncCheckbox.addEventListener('change', handleToggleChange);
+    
+    // Cursor textbox toggle switch click
+    cursorTextBoxToggle.addEventListener('click', handleCursorTextBoxToggleClick);
+    cursorTextBoxToggle.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleCursorTextBoxToggleClick();
+        }
+    });
+    
+    // Cursor textbox checkbox change (sync with toggle)
+    enableCursorTextBoxCheckbox.addEventListener('change', handleCursorTextBoxToggleChange);
     
     // Open sidepanel button
     openSidepanelBtn.addEventListener('click', async () => {
@@ -92,6 +113,43 @@ async function handleToggleChange() {
         await chrome.storage.sync.set({ pageSyncEnabled: isEnabled });
     } catch (error) {
         console.error('Error saving page sync setting:', error);
+    }
+}
+
+/**
+ * Handle cursor textbox toggle switch click
+ */
+function handleCursorTextBoxToggleClick() {
+    enableCursorTextBoxCheckbox.checked = !enableCursorTextBoxCheckbox.checked;
+    handleCursorTextBoxToggleChange();
+}
+
+/**
+ * Handle cursor textbox toggle state change
+ */
+async function handleCursorTextBoxToggleChange() {
+    const isEnabled = enableCursorTextBoxCheckbox.checked;
+    
+    // Update visual state
+    cursorTextBoxToggle.classList.toggle('active', isEnabled);
+    cursorTextBoxToggle.setAttribute('aria-checked', isEnabled);
+    
+    // Save to storage
+    try {
+        await chrome.storage.sync.set({ cursorTextBoxEnabled: isEnabled });
+        
+        // Notify all tabs to update cursor textbox visibility
+        const tabs = await chrome.tabs.query({});
+        tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, {
+                type: 'toggleCursorTextBox',
+                enabled: isEnabled
+            }).catch(() => {
+                // Tab might not have content script loaded, ignore error
+            });
+        });
+    } catch (error) {
+        console.error('Error saving cursor textbox setting:', error);
     }
 }
 

@@ -12,10 +12,7 @@ SERVER_PORT = int(os.getenv('DECISION_AGENT_PORT', 8004))
 
 # OpenAI configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
-
-# Master Agent URL for forwarding insurance prompts
-MASTER_AGENT_URL = os.getenv('MASTER_AGENT_URL', 'http://localhost:9000')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4.1-nano')
 
 # Decision Agent specific settings
 TEMPERATURE = float(os.getenv('DECISION_TEMPERATURE', '0.3'))  # Lower temperature for more consistent decisions

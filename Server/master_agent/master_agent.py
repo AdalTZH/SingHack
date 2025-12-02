@@ -1,463 +1,539 @@
 """
-Master Agent - Orchestrates multi-agent workflows using LangGraph
-Routes queries to appropriate specialized agents
+Master Agent - Insurance Agent using LangGraph
+Implements a conversational insurance agent with state management
 """
-from typing import Dict, List, Optional, Any, Annotated
-from typing_extensions import TypedDict
-from langgraph.graph import StateGraph, START, END
+from typing import Dict, Any, List, TypedDict, Annotated, Optional
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
-import operator
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage, ToolMessage
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
 import logging
 
-from .config import OPENAI_API_KEY, OPENAI_MODEL, TEMPERATURE
-from .agent_client import AgentClient
+from .config import (
+    OPENAI_API_KEY, OPENAI_MODEL, TEMPERATURE, MAX_TOKENS,
+    INSURANCE_AGENT_SYSTEM_PROMPT, MAX_ITERATIONS
+)
+
+# Import policy analyzer tools
+try:
+    import sys
+    import os
+    # Add policy_analyzer_mcp to path
+    policy_mcp_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'policy_analyzer_mcp')
+    if policy_mcp_path not in sys.path:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from policy_analyzer_mcp.langchain_tools import get_policy_analyzer_tools
+    POLICY_TOOLS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Policy Analyzer tools not available: {e}")
+    POLICY_TOOLS_AVAILABLE = False
+
+# Import quotation tools
+try:
+    from .quotation_tools import get_quotation_tools
+    QUOTATION_TOOLS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Quotation tools not available: {e}")
+    QUOTATION_TOOLS_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class MasterAgentState(TypedDict):
-    """State schema for the master agent workflow"""
-    user_query: str
-    session_context: Dict[str, Any]
-    messages: Annotated[List[BaseMessage], operator.add]  # Chat history
-    agent_responses: Annotated[List[Dict[str, Any]], operator.add]
-    classification: Optional[str]
-    routing_decision: Optional[str]
-    final_response: Optional[str]
+class AgentState(TypedDict):
+    """State for the insurance agent conversation
+    
+    - messages: Stores full chat history using LangGraph's add_messages reducer
+                All HumanMessage, AIMessage, SystemMessage, and ToolMessage objects
+                are accumulated here across the conversation
+    - conversation_history: Derived summary format for external API compatibility
+    - iteration_count: Number of agent iterations in current workflow run
+    - document_summaries: List of document summaries from uploaded PDFs
+    """
+    messages: Annotated[List[BaseMessage], add_messages]
+    conversation_history: List[Dict[str, str]]
+    iteration_count: int
+    document_summaries: Optional[List[Dict[str, Any]]]
 
 
 class MasterAgent:
     """
-    Master Agent that orchestrates communication with specialized agents:
-    - Classifier Agent: Determines query type
-    - Predict Agent: Provides insurance recommendations
-    - Risk Agent: Assesses travel risks
+    Master Insurance Agent using LangGraph
+    
+    This agent:
+    1. Maintains conversation state
+    2. Processes user messages
+    3. Generates insurance-related responses
+    4. Manages conversation flow
     """
     
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: str = None, temperature: float = None):
         """
         Initialize the Master Agent
         
         Args:
             model_name: OpenAI model name (default: from config)
+            temperature: Temperature for LLM (default: from config)
         """
         self.model_name = model_name or OPENAI_MODEL
+        self.temperature = temperature if temperature is not None else TEMPERATURE
+        
+        # Initialize LLM
         self.llm = ChatOpenAI(
             api_key=OPENAI_API_KEY,
             model=self.model_name,
-            temperature=TEMPERATURE
+            temperature=self.temperature,
+            max_tokens=MAX_TOKENS
         )
-        self.agent_client = AgentClient()
-        self.graph = self._build_graph()
+        
+        # Bind policy analyzer tools and quotation tools if available
+        all_tools = []
+        
+        if POLICY_TOOLS_AVAILABLE:
+            try:
+                policy_tools = get_policy_analyzer_tools()
+                all_tools.extend(policy_tools)
+                logger.info(f"Loaded {len(policy_tools)} policy analyzer tools")
+            except Exception as e:
+                logger.warning(f"Failed to load policy tools: {e}")
+        
+        if QUOTATION_TOOLS_AVAILABLE:
+            try:
+                quotation_tools = get_quotation_tools()
+                all_tools.extend(quotation_tools)
+                logger.info(f"Loaded {len(quotation_tools)} quotation tools")
+            except Exception as e:
+                logger.warning(f"Failed to load quotation tools: {e}")
+        
+        # Bind all tools to LLM
+        if all_tools:
+            try:
+                self.llm = self.llm.bind_tools(all_tools)
+                logger.info(f"Bound {len(all_tools)} total tools to LLM")
+            except Exception as e:
+                logger.warning(f"Failed to bind tools: {e}")
+                self.llm = ChatOpenAI(
+                    api_key=OPENAI_API_KEY,
+                    model=self.model_name,
+                    temperature=self.temperature,
+                    max_tokens=MAX_TOKENS
+                )
+        
+        # Build LangGraph workflow
+        self.workflow = self._build_workflow()
+        self.app = self.workflow.compile()
+        
+        logger.info(f"Master Agent initialized with model: {self.model_name}")
     
-    def _build_graph(self) -> StateGraph:
+    def _build_workflow(self) -> StateGraph:
         """
-        Build the LangGraph workflow for master agent orchestration
+        Build the LangGraph workflow for the insurance agent
         
         Returns:
-            Compiled StateGraph
+            StateGraph workflow
         """
-        # Create the graph builder
-        graph_builder = StateGraph(MasterAgentState)
+        workflow = StateGraph(AgentState)
         
         # Add nodes
-        graph_builder.add_node("route_query", self._route_query)
-        graph_builder.add_node("call_classifier", self._call_classifier)
-        graph_builder.add_node("call_predict", self._call_predict)
-        graph_builder.add_node("call_risk", self._call_risk)
-        graph_builder.add_node("synthesize_response", self._synthesize_response)
+        workflow.add_node("agent", self._agent_node)
+        workflow.add_node("check_iterations", self._check_iterations_node)
         
-        # Define edges
-        graph_builder.add_edge(START, "route_query")
-        graph_builder.add_conditional_edges(
-            "route_query",
-            self._route_to_agent,
+        # Set entry point
+        workflow.set_entry_point("agent")
+        
+        # Add edges
+        workflow.add_edge("agent", "check_iterations")
+        workflow.add_conditional_edges(
+            "check_iterations",
+            self._should_continue,
             {
-                "classify": "call_classifier",
-                "predict": "call_predict",
-                "risk": "call_risk",
-                "direct": "synthesize_response",
-                END: END
+                "continue": "agent",
+                "end": END
             }
         )
-        graph_builder.add_edge("call_classifier", "synthesize_response")
-        graph_builder.add_edge("call_predict", "synthesize_response")
-        graph_builder.add_edge("call_risk", "synthesize_response")
-        graph_builder.add_edge("synthesize_response", END)
         
-        # Compile the graph
-        return graph_builder.compile()
+        return workflow
     
-    def _route_query(self, state: MasterAgentState) -> Dict[str, Any]:
+    def _build_system_prompt(self, document_summaries: Optional[List[Dict[str, Any]]] = None) -> str:
         """
-        Route the query to determine which agent(s) to call
+        Build system prompt with optional document context
         
         Args:
-            state: Current state
+            document_summaries: List of document summaries from uploaded PDFs
             
         Returns:
-            Updated state with routing decision
+            Enhanced system prompt with document context
         """
-        user_query = state.get('user_query', '')
-        logger.info(f"Routing query: {user_query}")
+        system_prompt = INSURANCE_AGENT_SYSTEM_PROMPT
         
-        # Simple heuristic-based routing
-        query_lower = user_query.lower()
+        # Add document context if summaries are available
+        if document_summaries and len(document_summaries) > 0:
+            document_context = "\n\n=== UPLOADED DOCUMENTS ===\n"
+            document_context += "The user has uploaded the following documents. Use this information to answer questions about their insurance documents, policy details, coverage, claims, or any information contained in these documents:\n\n"
+            
+            for idx, doc_summary in enumerate(document_summaries, 1):
+                file_name = doc_summary.get('file_name', f'Document {idx}')
+                summary = doc_summary.get('summary', '')
+                pages = doc_summary.get('metadata', {}).get('pages', 'unknown')
+                
+                document_context += f"Document {idx}: {file_name} ({pages} pages)\n"
+                document_context += f"Summary: {summary}\n\n"
+                
+                # Add extracted text if available (truncated for context)
+                extracted_text = doc_summary.get('text', '')
+                if extracted_text:
+                    # Include first 500 characters of extracted text for reference
+                    text_preview = extracted_text[:500] + ('...' if len(extracted_text) > 500 else '')
+                    document_context += f"Text Preview: {text_preview}\n\n"
+            
+            document_context += "When answering questions:\n"
+            document_context += "- Reference specific details from these documents when relevant\n"
+            document_context += "- Compare information in documents with available insurance products\n"
+            document_context += "- Help users understand what their current documents cover\n"
+            document_context += "- Suggest improvements or additional coverage if needed\n"
+            
+            system_prompt = system_prompt + document_context
         
-        # Check for specific patterns
-        if any(keyword in query_lower for keyword in ['compare', 'which', 'better', 'difference']):
-            routing = "compare"
-        elif any(keyword in query_lower for keyword in ['recommend', 'best plan', 'suitable', 'insurance plan', 'suggest']):
-            routing = "predict"
-        elif any(keyword in query_lower for keyword in ['risk', 'danger', 'safe', 'advisory', 'disaster', 'natural', 'weather', 'traveling', 'country', 'activity']):
-            routing = "risk"
-        elif any(keyword in query_lower for keyword in ['explain', 'what', 'how', 'tell me']):
-            routing = "explain"
-        else:
-            routing = "general"
-        
-        logger.info(f"Routing decision: {routing}")
-        
-        return {
-            'routing_decision': routing
-        }
+        return system_prompt
     
-    def _route_to_agent(self, state: MasterAgentState) -> str:
+    def _agent_node(self, state: AgentState) -> AgentState:
         """
-        Route to the appropriate agent based on routing decision
-        Only classify when NOT suggesting insurance plans (predict), not for risk assessment
+        Agent node that processes messages and generates responses
         
         Args:
-            state: Current state
+            state: Current agent state
             
         Returns:
-            Next node to visit
+            Updated state with agent response
         """
-        routing = state.get('routing_decision', 'general')
-        
-        # Route to specific agent based on decision
-        if routing == 'predict':
-            # For insurance plan suggestions, go directly to predict agent
-            return "predict"
-        elif routing == 'risk':
-            # For risk assessment, go directly to risk agent
-            return "risk"
-        elif routing in ['compare', 'explain', 'general']:
-            # For other queries, use classifier to understand intent
-            return "classify"
-        else:
-            return "direct"
-    
-    def _call_classifier(self, state: MasterAgentState) -> Dict[str, Any]:
-        """
-        Call the Classifier Agent
-        
-        Args:
-            state: Current state
-            
-        Returns:
-            Updated state with classification results
-        """
-        user_query = state.get('user_query', '')
-        logger.info(f"Calling Classifier Agent for: {user_query}")
-        
         try:
-            # Try to import and use ClassifierAgent directly
-            try:
-                import sys
-                import os
-                # Add parent directory to path
-                sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-                from classifier_agent import ClassifierAgent
-                classifier = ClassifierAgent()
-                result = classifier.classify(user_query)
-            except Exception as import_error:
-                logger.warning(f"Direct import failed, using fallback: {import_error}")
-                # Fallback to mock response
-                result = {
-                    'classification': 'general',
-                    'confidence': 0.5,
-                    'reasoning': 'Using fallback classification'
-                }
+            # Get messages from state (add_messages reducer handles merging)
+            messages = state.get("messages", [])
             
-            logger.info(f"Classification result: {result}")
+            # Get document summaries from state
+            document_summaries = state.get("document_summaries")
             
+            # Get the last user message for logging
+            last_user_msg = None
+            for msg in reversed(messages):
+                if isinstance(msg, HumanMessage):
+                    last_user_msg = msg.content
+                    break
+            
+            if last_user_msg:
+                print(f"🔄 Processing in LangGraph agent node...")
+                print(f"📝 User input: {last_user_msg[:100]}...")
+                if document_summaries:
+                    print(f"📄 Document summaries available: {len(document_summaries)} document(s)")
+            
+            # Build system prompt with document context
+            system_prompt = self._build_system_prompt(document_summaries)
+            
+            # Prepare messages for LLM (include enhanced system prompt)
+            llm_messages = [SystemMessage(content=system_prompt)]
+            llm_messages.extend(messages)
+            
+            # Generate response (may include tool calls)
+            print(f"🤖 Calling GPT model ({self.model_name})...")
+            response = self.llm.invoke(llm_messages)
+            print(f"✅ GPT response received ({len(response.content)} characters)")
+            
+            # Handle tool calls if present
+            if hasattr(response, 'tool_calls') and response.tool_calls and len(response.tool_calls) > 0:
+                print(f"🔧 Processing {len(response.tool_calls)} tool call(s)...")
+                tool_messages = []
+                
+                # Build tools dictionary from all available tools
+                tools_dict = {}
+                
+                if POLICY_TOOLS_AVAILABLE:
+                    try:
+                        from policy_analyzer_mcp.langchain_tools import get_policy_analyzer_tools
+                        policy_tools = get_policy_analyzer_tools()
+                        tools_dict.update({tool.name: tool for tool in policy_tools})
+                    except Exception as e:
+                        logger.warning(f"Failed to load policy tools for execution: {e}")
+                
+                if QUOTATION_TOOLS_AVAILABLE:
+                    try:
+                        from .quotation_tools import get_quotation_tools
+                        quotation_tools = get_quotation_tools()
+                        tools_dict.update({tool.name: tool for tool in quotation_tools})
+                    except Exception as e:
+                        logger.warning(f"Failed to load quotation tools for execution: {e}")
+                
+                for tool_call in response.tool_calls:
+                    tool_name = tool_call.get('name', '')
+                    tool_args = tool_call.get('args', {})
+                    tool_call_id = tool_call.get('id', '')
+                    
+                    print(f"  → Calling tool: {tool_name} with args: {tool_args}")
+                    
+                    if tool_name in tools_dict:
+                        try:
+                            # Execute tool
+                            tool_func = tools_dict[tool_name]
+                            # Handle both sync and async tools
+                            import inspect
+                            import asyncio
+                            
+                            # Execute tool (synchronous)
+                            tool_result = tool_func.invoke(tool_args)
+                            
+                            tool_messages.append(ToolMessage(
+                                content=str(tool_result),
+                                tool_call_id=tool_call_id
+                            ))
+                            print(f"  ✅ Tool {tool_name} completed")
+                        except Exception as e:
+                            error_msg = f"Error executing {tool_name}: {str(e)}"
+                            logger.error(error_msg)
+                            tool_messages.append(ToolMessage(
+                                content=error_msg,
+                                tool_call_id=tool_call_id
+                            ))
+                    else:
+                        error_msg = f"Unknown tool: {tool_name}"
+                        tool_messages.append(ToolMessage(
+                            content=error_msg,
+                            tool_call_id=tool_call_id
+                        ))
+                
+                # Add tool messages and get final response
+                if tool_messages:
+                    llm_messages.append(response)
+                    llm_messages.extend(tool_messages)
+                    print(f"🔄 Getting final response after tool execution...")
+                    response = self.llm.invoke(llm_messages)
+                    print(f"✅ Final response received ({len(response.content)} characters)")
+            
+            # Update conversation history from messages (ensure it's synced with chat history)
+            conversation_history = self._extract_conversation_history_from_messages(messages + [response])
+            
+            # Return state update - add_messages reducer will merge the new message
             return {
-                'classification': result.get('classification', 'general'),
-                'agent_responses': [{
-                    'agent': 'classifier',
-                    'result': result
-                }]
+                "messages": [response],  # add_messages will merge this with existing messages
+                "conversation_history": conversation_history,
+                "iteration_count": state.get("iteration_count", 0) + 1,
+                "document_summaries": state.get("document_summaries")  # Preserve document summaries
             }
         
         except Exception as e:
-            logger.error(f"Error calling Classifier Agent: {e}")
+            logger.error(f"Error in agent node: {e}")
+            # Return error response
+            error_message = AIMessage(content=f"I apologize, but I encountered an error. Please try again. Error: {str(e)}")
+            # Update conversation history from messages including error
+            messages = state.get("messages", [])
+            conversation_history = self._extract_conversation_history_from_messages(messages + [error_message])
             return {
-                'classification': 'general',
-                'agent_responses': [{
-                    'agent': 'classifier',
-                    'error': str(e)
-                }]
+                "messages": [error_message],  # add_messages will merge this
+                "conversation_history": conversation_history,
+                "iteration_count": state.get("iteration_count", 0) + 1,
+                "document_summaries": state.get("document_summaries")  # Preserve document summaries
             }
     
-    def _call_predict(self, state: MasterAgentState) -> Dict[str, Any]:
+    def _check_iterations_node(self, state: AgentState) -> AgentState:
         """
-        Call the Predict Agent
+        Check if we've exceeded max iterations
         
         Args:
-            state: Current state
+            state: Current agent state
             
         Returns:
-            Updated state with prediction results
+            State (unchanged, just for checking)
         """
-        user_query = state.get('user_query', '')
-        logger.info(f"Calling Predict Agent for: {user_query}")
-        
-        try:
-            # Import locally to avoid circular dependencies
-            from predict_agent import PredictAgentAPI
-            
-            predict_api = PredictAgentAPI()
-            
-            # For now, return a placeholder response
-            # In production, this would extract user data and call predict
-            result = {
-                'message': 'Predict Agent: Insurance plan recommendations based on historical data.',
-                'recommendations': []
-            }
-            
-            logger.info(f"Prediction result: {result}")
-            
-            return {
-                'agent_responses': [{
-                    'agent': 'predict',
-                    'result': result
-                }]
-            }
-        
-        except Exception as e:
-            logger.error(f"Error calling Predict Agent: {e}")
-            return {
-                'agent_responses': [{
-                    'agent': 'predict',
-                    'error': str(e)
-                }]
-            }
+        iteration_count = state.get("iteration_count", 0)
+        if iteration_count >= MAX_ITERATIONS:
+            logger.warning(f"Max iterations ({MAX_ITERATIONS}) reached")
+        return state
     
-    def _call_risk(self, state: MasterAgentState) -> Dict[str, Any]:
+    def _should_continue(self, state: AgentState) -> str:
         """
-        Call the Risk Agent using the API
+        Determine if conversation should continue
         
         Args:
-            state: Current state
+            state: Current agent state
             
         Returns:
-            Updated state with risk assessment results
+            "continue" or "end"
         """
-        user_query = state.get('user_query', '')
-        logger.info(f"Calling Risk Agent for: {user_query}")
+        iteration_count = state.get("iteration_count", 0)
         
-        try:
-            # Use the risk agent API through agent_client
-            # Since agent_client methods are async, we need to handle this in a sync context
-            import asyncio
-            
-            # Try to get the running event loop, or create a new one
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # Call the async agent client method
-            risk_result = loop.run_until_complete(
-                self.agent_client.call_risk(
-                    query=user_query,
-                    context=None
-                )
-            )
-            
-            logger.info(f"Risk assessment result: {risk_result}")
-            
-            # Format the response for synthesis
-            if risk_result.get('success'):
-                result = {
-                    'message': f"Risk assessment for travel: {risk_result.get('overall_risk_level', 'unknown')} overall risk level",
-                    'overall_risk_level': risk_result.get('overall_risk_level'),
-                    'weather_risks': risk_result.get('weather_risks', []),
-                    'natural_disasters': risk_result.get('natural_disasters', []),
-                    'travel_advisories': risk_result.get('travel_advisories', []),
-                    'activity_risks': risk_result.get('activity_risks', []),
-                    'recommendations': risk_result.get('recommendations', [])
-                }
-            else:
-                result = {
-                    'message': 'Risk assessment service available',
-                    'error': risk_result.get('error', 'Unknown error'),
-                    'note': 'Risk assessment capabilities via MCP tools'
-                }
-            
-            return {
-                'agent_responses': [{
-                    'agent': 'risk',
-                    'result': result
-                }]
-            }
+        # End if max iterations reached
+        if iteration_count >= MAX_ITERATIONS:
+            return "end"
         
-        except Exception as e:
-            logger.error(f"Error calling Risk Agent: {e}")
-            return {
-                'agent_responses': [{
-                    'agent': 'risk',
-                    'error': str(e),
-                    'result': {
-                        'message': 'Unable to complete risk assessment',
-                        'note': 'Service temporarily unavailable'
-                    }
-                }]
-            }
+        # For now, always end after one response (single-turn)
+        # Can be modified for multi-turn conversations
+        return "end"
     
-    def _synthesize_response(self, state: MasterAgentState) -> Dict[str, Any]:
+    def _extract_conversation_history_from_messages(self, messages: List[BaseMessage]) -> List[Dict[str, str]]:
         """
-        Synthesize the final response from agent results
+        Extract conversation history in simplified format from messages
+        
+        This method converts the full message history stored in the LangGraph state
+        into a simplified format for external API compatibility. It extracts only
+        HumanMessage and AIMessage pairs, filtering out SystemMessage, ToolMessage,
+        and intermediate tool call messages.
         
         Args:
-            state: Current state
+            messages: List of BaseMessage objects from LangGraph state
             
         Returns:
-            Updated state with final response
+            List of dictionaries with 'user' and 'assistant' keys
         """
-        user_query = state.get('user_query', '')
-        agent_responses = state.get('agent_responses', [])
-        classification = state.get('classification', 'general')
-        messages = state.get('messages', [])
+        conversation_history = []
+        current_pair = {}
         
-        logger.info(f"Synthesizing response from {len(agent_responses)} agent(s) with {len(messages)} previous messages")
-        
-        # Build message list with chat history
-        message_list = [
-            SystemMessage(content="You are a helpful travel insurance assistant with access to policy data, risk assessments, and recommendations.")
-        ]
-        
-        # Add previous conversation history
         for msg in messages:
-            message_list.append(msg)
+            # Skip system messages, tool messages, and other non-conversational messages
+            if isinstance(msg, (SystemMessage, ToolMessage)):
+                continue
+            
+            if isinstance(msg, HumanMessage):
+                # If we have an unpaired assistant message, save it first
+                if 'assistant' in current_pair and 'user' not in current_pair:
+                    conversation_history.append({
+                        'user': '',
+                        'assistant': current_pair['assistant']
+                    })
+                    current_pair = {}
+                # Start a new pair with user message
+                current_pair = {'user': msg.content}
+            
+            elif isinstance(msg, AIMessage):
+                # Check if this is a tool call message (skip intermediate tool calls)
+                tool_calls = getattr(msg, 'tool_calls', None)
+                if tool_calls and len(tool_calls) > 0:
+                    # Skip tool call messages in conversation history
+                    # We only want the final response after tool execution
+                    continue
+                
+                # Complete the pair with assistant message
+                if 'user' in current_pair:
+                    current_pair['assistant'] = msg.content
+                    conversation_history.append(current_pair)
+                    current_pair = {}
+                else:
+                    # Orphaned assistant message (shouldn't happen, but handle gracefully)
+                    current_pair['assistant'] = msg.content
         
-        # Add the current user query as a natural conversation message
-        message_list.append(HumanMessage(content=user_query))
+        # Handle any remaining unpaired messages
+        if current_pair:
+            if 'user' in current_pair and 'assistant' not in current_pair:
+                # Unpaired user message - this might happen mid-conversation
+                # Don't add incomplete pairs
+                pass
+            elif 'assistant' in current_pair:
+                conversation_history.append({
+                    'user': '',
+                    'assistant': current_pair['assistant']
+                })
         
-        # Build agent context to help synthesize the response
-        agent_context = f"""Based on my analysis using specialized agents:
-
-Classification: {classification}
-
-Agent Analysis:"""
-        
-        for response in agent_responses:
-            agent_name = response.get('agent', 'unknown')
-            result = response.get('result', {})
-            agent_context += f"\n\n{agent_name.upper()} Agent:\n{result}"
-        
-        try:
-            # Include agent context in system message when available
-            # This provides context while maintaining natural conversation flow
-            if agent_responses:
-                final_system = SystemMessage(
-                    content=f"""You are a helpful travel insurance assistant with access to policy data, risk assessments, and recommendations.
-
-{agent_context}
-
-Please provide a helpful, clear, and concise response to the user's query based on both the conversation history and the agent analysis above. Maintain context and continuity in your response."""
-                )
-                message_list_with_context = [final_system] + message_list[1:]  # Replace first system message
-            else:
-                message_list_with_context = message_list
-            
-            response = self.llm.invoke(message_list_with_context)
-            
-            final_response = response.content.strip()
-            
-            logger.info(f"Generated final response (length: {len(final_response)})")
-            
-            # Add current user query and assistant response to messages
-            new_messages = [
-                HumanMessage(content=user_query),
-                AIMessage(content=final_response)
-            ]
-            
-            return {
-                'final_response': final_response,
-                'messages': new_messages
-            }
-        
-        except Exception as e:
-            logger.error(f"Error synthesizing response: {e}")
-            # Fallback response
-            fallback = f"I received your query: '{user_query}'. I'm currently processing this with multiple specialized agents and will provide you with comprehensive information shortly."
-            
-            # Add messages even on error
-            new_messages = [
-                HumanMessage(content=user_query),
-                AIMessage(content=fallback)
-            ]
-            
-            return {
-                'final_response': fallback,
-                'messages': new_messages
-            }
+        return conversation_history
     
-    async def process_query(self, query: str, context: Optional[Dict] = None, messages: Optional[List[BaseMessage]] = None) -> Dict[str, Any]:
+    def chat(self, message: str, conversation_history: List[Dict[str, str]] = None, document_summaries: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
-        Main method to process a user query
+        Process a chat message and generate a response
+        
+        Chat history is stored in the LangGraph state's 'messages' field using
+        the add_messages reducer. All messages (HumanMessage, AIMessage, etc.)
+        are accumulated and maintained in the state across the workflow.
         
         Args:
-            query: User query
-            context: Optional session context
-            messages: Optional list of previous conversation messages (BaseMessage objects)
+            message: User's message
+            conversation_history: Previous conversation history (optional)
+                                 This will be converted to messages and added to state
+            document_summaries: List of document summaries from uploaded PDFs (optional)
+                               Each summary should have: file_name, summary, text, metadata
             
         Returns:
-            Response dictionary
+            Dictionary with response and metadata including updated conversation history
         """
-        logger.info(f"Processing query: {query}")
-        
-        # Convert messages to list if provided, otherwise use empty list
-        initial_messages = messages if messages is not None else []
-        
         try:
-            # Invoke the graph
-            result = self.graph.invoke({
-                'user_query': query,
-                'session_context': context or {},
-                'messages': initial_messages,
-                'agent_responses': [],
-                'classification': None,
-                'routing_decision': None,
-                'final_response': None
-            })
+            # Prepare initial state with chat history
+            messages = []
+            
+            # Add conversation history if provided (convert to messages format)
+            # This reconstructs the message history from the simplified format
+            if conversation_history:
+                for entry in conversation_history:
+                    if "user" in entry and entry["user"]:
+                        messages.append(HumanMessage(content=entry["user"]))
+                    if "assistant" in entry and entry["assistant"]:
+                        messages.append(AIMessage(content=entry["assistant"]))
+            
+            # Add the current user message
+            messages.append(HumanMessage(content=message))
+            
+            # Initialize state with messages - LangGraph's add_messages reducer will handle merging
+            initial_state: AgentState = {
+                "messages": messages,  # Full chat history stored here
+                "conversation_history": conversation_history or [],
+                "iteration_count": 0,
+                "document_summaries": document_summaries or []  # Include document summaries
+            }
+            
+            # Log document summaries for debugging
+            if document_summaries:
+                print(f"📄 Initializing state with {len(document_summaries)} document summary(ies)")
+                for idx, doc in enumerate(document_summaries, 1):
+                    print(f"   Doc {idx}: {doc.get('file_name', 'Unknown')} - Summary: {bool(doc.get('summary'))}, Text: {bool(doc.get('text'))}")
+            else:
+                print("📄 No document summaries provided in chat request")
+            
+            # Run the workflow - messages will be accumulated via add_messages reducer
+            result = self.app.invoke(initial_state)
+            
+            # Get all messages from state (includes full chat history)
+            all_messages = result.get("messages", [])
+            
+            # Extract the last AI message for response
+            ai_messages = [msg for msg in all_messages if isinstance(msg, AIMessage)]
+            
+            if not ai_messages:
+                raise ValueError("No AI response generated")
+            
+            response_text = ai_messages[-1].content
+            
+            # Get updated conversation history from state (should be synced with messages)
+            updated_conversation_history = result.get("conversation_history", [])
+            
+            # Ensure conversation_history is derived from messages for consistency
+            # This ensures the history format matches what's actually in the state
+            if all_messages:
+                updated_conversation_history = self._extract_conversation_history_from_messages(all_messages)
+            
+            # Log to terminal
+            print(f"✅ LangGraph workflow completed successfully")
+            print(f"📊 Iterations: {result.get('iteration_count', 0)}")
+            print(f"💬 Total messages in state: {len(all_messages)}")
+            print(f"📝 Conversation history entries: {len(updated_conversation_history)}")
+            print(f"🤖 Model: {self.model_name}")
             
             return {
-                'success': True,
-                'response': result['final_response'],
-                'classification': result.get('classification'),
-                'agents_consulted': [r.get('agent') for r in result.get('agent_responses', [])],
-                'metadata': {
-                    'routing_decision': result.get('routing_decision')
-                },
-                'messages': result.get('messages', [])  # Return updated messages for next request
+                "success": True,
+                "response": response_text,
+                "conversation_history": updated_conversation_history,  # Synced with messages
+                "metadata": {
+                    "model": self.model_name,
+                    "iterations": result.get("iteration_count", 0),
+                    "total_messages": len(all_messages)  # Show chat history is stored
+                }
             }
         
         except Exception as e:
-            logger.error(f"Error processing query: {e}")
+            logger.error(f"Error in chat: {e}")
             return {
-                'success': False,
-                'response': f"I encountered an error processing your query: {str(e)}",
-                'error': str(e),
-                'messages': initial_messages  # Return messages even on error
+                "success": False,
+                "error": str(e),
+                "response": None
             }
     
-    async def close(self):
-        """Clean up resources"""
-        await self.agent_client.close()
+    def reset(self):
+        """
+        Reset the agent state (for new conversations)
+        """
+        logger.info("Master Agent reset")
+        # The state is managed per conversation, so this is mainly for logging
 

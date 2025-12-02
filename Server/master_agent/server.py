@@ -1,21 +1,20 @@
 """
-FastAPI Server for Master Agent
-Exposes HTTP endpoints for the Chrome extension
+FastAPI Server for Master Agent (Insurance Agent)
+Exposes HTTP endpoints for chat interface
 """
-from fastapi import FastAPI, HTTPException, Request, File, UploadFile
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, List, Dict, Any
 import logging
 import uvicorn
 import base64
 import io
-import tempfile
-import os
 
-from .config import SERVER_HOST, SERVER_PORT, ALLOWED_ORIGINS
+from .config import SERVER_HOST, SERVER_PORT, ALLOWED_ORIGINS, OPENAI_API_KEY
 from .master_agent import MasterAgent
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
+import requests
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Master Agent API",
-    description="Central orchestration agent for travel insurance queries",
+    description="Insurance Agent powered by LangGraph and GPT",
     version="1.0.0"
 )
 
@@ -41,112 +40,81 @@ master_agent = None
 
 
 # ============================================================================
-# Helper Functions
-# ============================================================================
-
-def messages_from_dict(messages: Optional[List[Dict[str, Any]]]) -> List[BaseMessage]:
-    """
-    Convert list of message dictionaries to LangChain BaseMessage objects
-    
-    Args:
-        messages: List of message dicts with 'role' and 'content' keys
-                 Format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-    
-    Returns:
-        List of BaseMessage objects
-    """
-    if not messages:
-        return []
-    
-    result = []
-    for msg in messages:
-        role = msg.get("role", "").lower()
-        content = msg.get("content", "")
-        
-        if role == "user":
-            result.append(HumanMessage(content=content))
-        elif role == "assistant":
-            result.append(AIMessage(content=content))
-        elif role == "system":
-            result.append(SystemMessage(content=content))
-        else:
-            # Default to human message if role is unknown
-            logger.warning(f"Unknown message role: {role}, defaulting to HumanMessage")
-            result.append(HumanMessage(content=content))
-    
-    return result
-
-
-def messages_to_dict(messages: List[BaseMessage]) -> List[Dict[str, Any]]:
-    """
-    Convert LangChain BaseMessage objects to list of dictionaries for JSON serialization
-    
-    Args:
-        messages: List of BaseMessage objects
-    
-    Returns:
-        List of message dicts with 'role' and 'content' keys
-    """
-    result = []
-    for msg in messages:
-        if isinstance(msg, HumanMessage):
-            result.append({"role": "user", "content": msg.content})
-        elif isinstance(msg, AIMessage):
-            result.append({"role": "assistant", "content": msg.content})
-        elif isinstance(msg, SystemMessage):
-            result.append({"role": "system", "content": msg.content})
-        else:
-            # Fallback for unknown message types
-            result.append({"role": "user", "content": str(msg.content)})
-    
-    return result
-
-
-# ============================================================================
 # Request/Response Models
 # ============================================================================
 
-class ChatRequest(BaseModel):
-    """Request model for chat endpoint"""
-    message: str = Field(..., description="User message")
-    temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="Temperature for response")
-    context: Optional[Dict[str, Any]] = Field(None, description="Session context")
-    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Previous conversation history. Format: [{\"role\": \"user\", \"content\": \"...\"}, {\"role\": \"assistant\", \"content\": \"...\"}]")
+class DocumentSummary(BaseModel):
+    """Model for document summary"""
+    file_name: str = Field(..., description="Name of the uploaded file")
+    summary: Optional[str] = Field(None, description="AI-generated summary of the document")
+    text: Optional[str] = Field(None, description="Extracted text from the document")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Document metadata (pages, etc.)")
+
+
+class ChatMessage(BaseModel):
+    """Request model for chat messages"""
+    message: str = Field(..., description="User's message")
+    temperature: Optional[float] = Field(None, description="Temperature for response generation")
+    conversation_history: Optional[List[Dict[str, str]]] = Field(
+        None, 
+        description="Previous conversation history"
+    )
+    document_summaries: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="List of document summaries from uploaded PDFs. Each should have file_name, summary, text, and metadata."
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "Which insurance plan is best for skiing in Japan?",
+                "message": "What does travel insurance cover?",
                 "temperature": 0.7,
-                "messages": [
-                    {"role": "user", "content": "I'm planning a trip to Japan"},
-                    {"role": "assistant", "content": "That sounds exciting! Where in Japan are you planning to visit?"}
+                "conversation_history": [],
+                "document_summaries": [
+                    {
+                        "file_name": "policy.pdf",
+                        "summary": "This document outlines travel insurance policy details...",
+                        "text": "Full extracted text...",
+                        "metadata": {"pages": 5}
+                    }
                 ]
             }
         }
 
 
 class ChatResponse(BaseModel):
-    """Response model for chat endpoint"""
+    """Response model for chat messages"""
     success: bool
-    response: str
-    classification: Optional[str] = None
-    agents_consulted: Optional[List[str]] = None
-    metadata: Optional[Dict[str, Any]] = None
+    response: Optional[str] = Field(None, description="Agent's response")
     error: Optional[str] = None
-    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Updated conversation history including current exchange")
+    conversation_history: Optional[List[Dict[str, str]]] = Field(
+        None,
+        description="Updated conversation history"
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Additional metadata"
+    )
+    insights: Optional[str] = Field(
+        None,
+        description="Dynamic insights from analytics (if available)"
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
                 "success": True,
-                "response": "Based on your skiing trip to Japan, I recommend...",
-                "classification": "recommendation",
-                "agents_consulted": ["predict", "risk"],
-                "messages": [
-                    {"role": "user", "content": "Which insurance plan is best for skiing in Japan?"},
-                    {"role": "assistant", "content": "Based on your skiing trip to Japan, I recommend..."}
-                ]
+                "response": "Travel insurance typically covers trip cancellation, medical emergencies, baggage loss, and more...",
+                "conversation_history": [
+                    {
+                        "user": "What does travel insurance cover?",
+                        "assistant": "Travel insurance typically covers..."
+                    }
+                ],
+                "metadata": {
+                    "model": "gpt-4o",
+                    "iterations": 1
+                }
             }
         }
 
@@ -156,35 +124,28 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
+    model: Optional[str] = None
 
 
 class SpeechToTextRequest(BaseModel):
-    """Request model for speech-to-text endpoint"""
+    """Request model for speech-to-text"""
     audio_data: str = Field(..., description="Base64 encoded audio data")
-    format: Optional[str] = Field("webm", description="Audio format (webm, wav, mp3)")
+    format: Optional[str] = Field("webm", description="Audio format (webm, wav, etc.)")
     
     class Config:
         json_schema_extra = {
             "example": {
-                "audio_data": "UklGRiQAAABXQVZFZm10...",
+                "audio_data": "base64_encoded_audio_string",
                 "format": "webm"
             }
         }
 
 
 class SpeechToTextResponse(BaseModel):
-    """Response model for speech-to-text endpoint"""
+    """Response model for speech-to-text"""
     success: bool
-    text: Optional[str] = None
+    text: Optional[str] = Field(None, description="Transcribed text")
     error: Optional[str] = None
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "success": True,
-                "text": "Which insurance plan is best for my trip?"
-            }
-        }
 
 
 # ============================================================================
@@ -196,8 +157,12 @@ async def startup_event():
     """Initialize master agent on startup"""
     global master_agent
     logger.info("Initializing Master Agent...")
-    master_agent = MasterAgent()
-    logger.info("Master Agent initialized successfully")
+    try:
+        master_agent = MasterAgent()
+        logger.info("Master Agent initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Master Agent: {e}")
+        raise
 
 
 @app.on_event("shutdown")
@@ -205,8 +170,8 @@ async def shutdown_event():
     """Clean up on shutdown"""
     global master_agent
     if master_agent:
-        await master_agent.close()
-        logger.info("Master Agent closed")
+        logger.info("Master Agent shutdown")
+        master_agent = None
 
 
 # ============================================================================
@@ -218,10 +183,12 @@ async def root():
     """
     Root endpoint - returns API information
     """
+    global master_agent
     return HealthResponse(
         status="healthy",
         service="Master Agent API",
-        version="1.0.0"
+        version="1.0.0",
+        model=master_agent.model_name if master_agent else None
     )
 
 
@@ -230,54 +197,103 @@ async def health_check():
     """
     Health check endpoint
     """
+    global master_agent
     return HealthResponse(
-        status="healthy",
+        status="healthy" if master_agent else "initializing",
         service="Master Agent API",
-        version="1.0.0"
+        version="1.0.0",
+        model=master_agent.model_name if master_agent else None
     )
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat(request: ChatMessage):
     """
-    Main chat endpoint - processes user queries and routes to appropriate agents
+    Chat endpoint for insurance agent
     
-    This is the primary endpoint that the Chrome extension calls.
-    The master agent orchestrates communication with specialized agents:
-    - Classifier Agent: Determines query type
-    - Predict Agent: Provides insurance recommendations
-    - Risk Agent: Assesses travel risks
+    Receives user messages and returns insurance agent responses.
+    Supports conversation history for multi-turn conversations.
     
-    Supports conversation history via the 'messages' field in the request.
-    Returns updated messages in the response for maintaining context across requests.
+    Args:
+        request: Chat message with optional conversation history
+        
+    Returns:
+        Agent response with updated conversation history
     """
     global master_agent
     
     if not master_agent:
         raise HTTPException(status_code=503, detail="Master Agent not initialized")
     
-    logger.info(f"Received chat request: {request.message[:100]}...")
-    if request.messages:
-        logger.info(f"Received {len(request.messages)} previous messages for context")
+    # Print to terminal with clear formatting
+    print("\n" + "="*80)
+    print("📨 MASTER AGENT - INCOMING REQUEST")
+    print("="*80)
+    print(f"👤 User Message: {request.message}")
+    if request.temperature:
+        print(f"🌡️  Temperature: {request.temperature}")
+    if request.conversation_history:
+        print(f"💬 Conversation History: {len(request.conversation_history)} previous messages")
+    if request.document_summaries:
+        print(f"📄 Document Summaries: {len(request.document_summaries)} document(s) available")
+        for idx, doc in enumerate(request.document_summaries, 1):
+            print(f"   Document {idx}: {doc.get('file_name', 'Unknown')}")
+            print(f"   - Has summary: {bool(doc.get('summary'))}")
+            print(f"   - Has text: {bool(doc.get('text'))}")
+            if doc.get('summary'):
+                print(f"   - Summary length: {len(doc.get('summary', ''))} chars")
+    else:
+        print("📄 Document Summaries: None provided")
+    print("-"*80)
+    
+    logger.info(f"Received chat message: {request.message[:100]}...")
     
     try:
-        # Convert message dictionaries to BaseMessage objects
-        langchain_messages = messages_from_dict(request.messages)
+        # Use custom temperature if provided
+        agent = master_agent
+        if request.temperature is not None:
+            # Create a temporary agent with custom temperature
+            from .master_agent import MasterAgent
+            agent = MasterAgent(temperature=request.temperature)
         
-        result = await master_agent.process_query(
-            query=request.message,
-            context=request.context,
-            messages=langchain_messages if langchain_messages else None
+        # Process the chat message with document summaries
+        result = agent.chat(
+            message=request.message,
+            conversation_history=request.conversation_history,
+            document_summaries=request.document_summaries
         )
         
-        # Convert BaseMessage objects back to dictionaries for JSON response
-        if result.get('messages'):
-            result['messages'] = messages_to_dict(result['messages'])
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=500,
+                detail=result.get("error", "Unknown error occurred")
+            )
         
-        return ChatResponse(**result)
+        response_text = result.get('response', '')
+        
+        # Note: Insights are now handled separately by the frontend
+        # The Insights Agent runs independently and the frontend combines both responses
+        
+        # Print full response to terminal
+        print("\n🤖 MASTER AGENT - RESPONSE")
+        print("-"*80)
+        print(response_text)
+        print("="*80 + "\n")
+        
+        logger.info(f"Generated response: {response_text[:100]}...")
+        
+        return ChatResponse(
+            success=True,
+            response=result.get("response"),
+            conversation_history=result.get("conversation_history"),
+            metadata=result.get("metadata"),
+            insights=None  # Insights handled separately by frontend
+        )
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error processing chat request: {e}")
+        logger.error(f"Error processing chat message: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -287,91 +303,76 @@ async def chat_endpoint(request: ChatRequest):
 @app.post("/speech-to-text", response_model=SpeechToTextResponse)
 async def speech_to_text(request: SpeechToTextRequest):
     """
-    Convert speech audio to text using OpenAI Whisper API
+    Speech-to-text endpoint for converting audio to text
     
-    Receives base64-encoded audio data from the Chrome extension
-    and returns transcribed text for chat processing.
+    Uses OpenAI Whisper API for transcription.
+    
+    Args:
+        request: Audio data and format
+        
+    Returns:
+        Transcribed text
     """
     try:
-        from openai import OpenAI
-        
-        # Get OpenAI API key from config
-        api_key = os.getenv('OPENAI_API_KEY', '')
-        if not api_key:
-            raise HTTPException(status_code=500, detail="OpenAI API key not configured")
-        
-        client = OpenAI(api_key=api_key)
-        
         # Decode base64 audio data
         try:
             audio_bytes = base64.b64decode(request.audio_data)
         except Exception as e:
-            logger.error(f"Error decoding base64 audio: {e}")
-            raise HTTPException(status_code=400, detail="Invalid base64 audio data")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid base64 audio data: {str(e)}"
+            )
         
-        # Save audio to temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{request.format}') as temp_file:
-            temp_file.write(audio_bytes)
-            temp_file_path = temp_file.name
-        
+        # Use OpenAI Whisper API for transcription
         try:
-            # Call OpenAI Whisper API
-            with open(temp_file_path, 'rb') as audio_file:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="en"  # Can be made configurable
+            from openai import OpenAI
+            
+            if not OPENAI_API_KEY:
+                raise HTTPException(
+                    status_code=500,
+                    detail="OpenAI API key not configured"
                 )
             
-            text = transcript.text
+            client = OpenAI(api_key=OPENAI_API_KEY)
             
-            logger.info(f"Speech transcribed successfully: {text[:100]}...")
+            # Create a file-like object from bytes
+            audio_file = io.BytesIO(audio_bytes)
+            audio_file.name = f"audio.{request.format or 'webm'}"
+            
+            # Transcribe using Whisper
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="text"
+            )
+            
+            logger.info(f"Speech-to-text transcription successful")
             
             return SpeechToTextResponse(
                 success=True,
-                text=text
+                text=transcript
             )
         
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="OpenAI library not installed. Install with: pip install openai"
+            )
+        except Exception as e:
+            logger.error(f"Error in speech-to-text transcription: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Transcription error: {str(e)}"
+            )
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in speech-to-text: {e}")
+        logger.error(f"Error processing speech-to-text request: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Speech transcription failed: {str(e)}"
+            detail=f"Internal server error: {str(e)}"
         )
-
-
-@app.get("/agents")
-async def list_agents():
-    """
-    List available specialized agents
-    """
-    return {
-        "agents": [
-            {
-                "name": "classifier",
-                "description": "Classifies user queries into types",
-                "capabilities": ["comparison", "explanation", "eligibility", "scenario"]
-            },
-            {
-                "name": "predict",
-                "description": "Recommends insurance plans based on historical data",
-                "capabilities": ["recommendation", "product comparison", "claims analysis"]
-            },
-            {
-                "name": "risk",
-                "description": "Assesses travel risks and hazards",
-                "capabilities": ["weather", "disasters", "advisories", "destination safety"]
-            }
-        ],
-        "total": 3
-    }
 
 
 # ============================================================================

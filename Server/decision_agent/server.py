@@ -10,7 +10,7 @@ import logging
 import uvicorn
 import httpx
 
-from .config import SERVER_HOST, SERVER_PORT, ALLOWED_ORIGINS, MASTER_AGENT_URL
+from .config import SERVER_HOST, SERVER_PORT, ALLOWED_ORIGINS
 from .decision_agent import DecisionAgent
 
 logging.basicConfig(level=logging.INFO)
@@ -67,8 +67,7 @@ class PageSyncResponse(BaseModel):
     is_travel_related: bool = Field(..., description="Whether page is travel-related")
     insurance_needed: bool = Field(..., description="Whether insurance might be needed")
     travel_context: Optional[str] = Field(None, description="Type of travel activity")
-    forwarded_to_master: Optional[bool] = Field(None, description="Whether prompt was forwarded to master agent")
-    master_agent_response: Optional[str] = Field(None, description="Response from master agent (to display in chat)")
+    persuasion_message: Optional[str] = Field(None, description="1-liner persuasion message (max 20 words) to display in cursor textbox")
     error: Optional[str] = None
     
     class Config:
@@ -81,8 +80,7 @@ class PageSyncResponse(BaseModel):
                 "is_travel_related": True,
                 "insurance_needed": True,
                 "travel_context": "international flight booking",
-                "forwarded_to_master": True,
-                "master_agent_response": "Based on your flight booking, I recommend considering travel insurance..."
+                "persuasion_message": "Protect your adventure! Travel insurance = peace of mind ✈️"
             }
         }
 
@@ -151,14 +149,14 @@ async def analyze_page_sync(request: PageSyncRequest):
     This endpoint:
     1. Analyzes the page content to determine if it's travel-related
     2. Decides if insurance might be needed
-    3. If yes, automatically forwards a prompt to the master agent
-    4. Returns the decision and whether it was forwarded
+    3. If yes, generates a catchy persuasion message (max 20 words)
+    4. Returns the decision and persuasion message to display in cursor textbox
     
     Args:
         request: Page sync data (URL, title, HTML content)
         
     Returns:
-        Decision result with forwarding status
+        Decision result with persuasion message for cursor textbox display
     """
     global decision_agent
     
@@ -175,51 +173,41 @@ async def analyze_page_sync(request: PageSyncRequest):
             html_content=request.html_content
         )
         
-        # If decision is to prompt, forward to master agent
-        forwarded = False
-        master_agent_response = None
+        # If decision is to prompt, generate persuasion message for cursor textbox
+        persuasion_message = None
         if decision_result.get('should_prompt', False):
             try:
-                # Generate insurance prompt
-                insurance_prompt = decision_agent.generate_insurance_prompt(decision_result)
-                
-                # Forward to master agent
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    master_response = await client.post(
-                        f"{MASTER_AGENT_URL}/chat",
-                        json={
-                            "message": insurance_prompt,
-                            "context": {
-                                "source": "decision_agent",
-                                "page_url": request.url,
-                                "page_title": request.title,
-                                "travel_context": decision_result.get('travel_context', '')
-                            }
-                        }
-                    )
-                    
-                    if master_response.status_code == 200:
-                        forwarded = True
-                        master_response_data = master_response.json()
-                        master_agent_response = master_response_data.get('response', '')
-                        
-                        if not master_agent_response:
-                            logger.warning("Master agent response is empty!")
-                            logger.warning(f"Master agent response data: {master_response_data}")
-                        else:
-                            logger.info("Successfully forwarded insurance prompt to master agent")
-                            logger.info(f"Master agent response length: {len(master_agent_response)}")
-                            logger.info(f"Master agent response preview: {master_agent_response[:200]}...")
-                    else:
-                        error_text = master_response.text if hasattr(master_response, 'text') else 'Unknown error'
-                        logger.warning(f"Master agent returned {master_response.status_code}: {error_text}")
-            
+                # Generate 1-liner persuasion message for cursor textbox
+                persuasion_message = decision_agent.generate_persuasion_message(decision_result)
+                logger.info(f"Generated persuasion message: {persuasion_message}")
             except Exception as e:
-                logger.error(f"Error forwarding to master agent: {e}")
-                # Don't fail the request if forwarding fails
-                decision_result['forwarding_error'] = str(e)
+                logger.error(f"Error generating persuasion message: {e}")
+                # Generate fallback message if generation fails
+                travel_context = decision_result.get('travel_context', 'travel plans')
+                if travel_context:
+                    context_words = travel_context.split()[:3]
+                    context_short = ' '.join(context_words)
+                    persuasion_message = f"Protect your {context_short} with travel insurance! ✈️"
+                else:
+                    persuasion_message = "Secure your trip with travel insurance - peace of mind awaits!"
+                logger.warning(f"Using fallback persuasion message: {persuasion_message}")
+                decision_result['persuasion_error'] = str(e)
         
-        return PageSyncResponse(
+        # Safety check: ensure persuasion_message is set if should_prompt is True
+        if decision_result.get('should_prompt', False) and not persuasion_message:
+            travel_context = decision_result.get('travel_context', 'travel plans')
+            if travel_context:
+                context_words = travel_context.split()[:3]
+                context_short = ' '.join(context_words)
+                persuasion_message = f"Protect your {context_short} with travel insurance! ✈️"
+            else:
+                persuasion_message = "Secure your trip with travel insurance - peace of mind awaits!"
+            logger.warning(f"Persuasion message was None but should_prompt=True, using fallback: {persuasion_message}")
+        
+        # Log the response being sent
+        logger.info(f"Returning response: should_prompt={decision_result.get('should_prompt', False)}, persuasion_message={persuasion_message}")
+        
+        response = PageSyncResponse(
             success=True,
             should_prompt=decision_result.get('should_prompt', False),
             confidence=decision_result.get('confidence', 0.0),
@@ -227,9 +215,12 @@ async def analyze_page_sync(request: PageSyncRequest):
             is_travel_related=decision_result.get('is_travel_related', False),
             insurance_needed=decision_result.get('insurance_needed', False),
             travel_context=decision_result.get('travel_context'),
-            forwarded_to_master=forwarded,
-            master_agent_response=master_agent_response
+            persuasion_message=persuasion_message
         )
+        
+        # Double-check the response has persuasion_message
+        logger.info(f"Response persuasion_message field: {response.persuasion_message}")
+        return response
     
     except Exception as e:
         logger.error(f"Error analyzing page sync: {e}")

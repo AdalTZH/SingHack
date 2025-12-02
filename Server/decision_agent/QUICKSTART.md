@@ -28,7 +28,7 @@ OPENAI_MODEL=gpt-4o-mini
 # Decision Agent Configuration (optional)
 DECISION_AGENT_HOST=0.0.0.0
 DECISION_AGENT_PORT=8004
-MASTER_AGENT_URL=http://localhost:9000
+# Note: Master Agent forwarding removed - persuasion messages display in cursor textbox
 DECISION_TEMPERATURE=0.3
 DECISION_MAX_TOKENS=500
 DECISION_CONFIDENCE_THRESHOLD=0.7
@@ -97,14 +97,13 @@ print(response.json())
 1. Ensure `Extension/config.js` has the Decision Agent URL:
 ```javascript
 const CONFIG = {
-    DECISION_AGENT_URL: 'http://localhost:8004',
-    MASTER_AGENT_URL: 'http://localhost:9000'
+    DECISION_AGENT_URL: 'http://localhost:8004'
 };
 ```
 
-2. Make sure both Decision Agent and Master Agent servers are running
+2. Make sure Decision Agent server is running
 3. Reload the extension in Chrome
-4. The Decision Agent will automatically analyze page sync data
+4. The Decision Agent will automatically analyze page sync data and display persuasion messages in the cursor textbox
 
 ## 📊 API Documentation
 
@@ -114,25 +113,36 @@ Once the server is running, visit:
 
 ## 🔄 Complete Setup
 
-For the full system to work, you need:
+To use the Decision Agent:
 
-1. **Master Agent** (port 9000) - Already running
+1. **Decision Agent** (port 8004) - Start this
    ```bash
-   cd Server/master_agent
-   python -m master_agent.server
+   cd Server
+   python start_decision_agent.py
    ```
 
-2. **Decision Agent** (port 8004) - Start this now
-   ```bash
-   cd Server/decision_agent
-   python -m decision_agent.server
-   ```
+2. **Chrome Extension** - Make sure it's configured with the Decision Agent URL
+
+## 💬 Persuasion Messages
+
+The Decision Agent generates catchy persuasion messages (max 20 words) that appear in the cursor textbox when users visit travel-related pages. These messages:
+
+- Are short and won't take up screen space (max 20 words)
+- Are catchy and attention-grabbing
+- Display for 10 seconds with streaming animation
+- Focus on the specific travel activity
+
+Example messages:
+- "Protect your adventure! Travel insurance = peace of mind ✈️"
+- "Don't let surprises ruin your trip - get covered now!"
+- "Travel insurance: Your safety net for unexpected adventures"
 
 ## 🎯 Next Steps
 
 - Read `README.md` for detailed architecture
 - Check decision agent logs for analysis results
-- Monitor when insurance prompts are forwarded to Master Agent
+- Monitor persuasion messages in the cursor textbox
+- Test by visiting travel-related websites with the extension enabled
 
 ## 🐛 Troubleshooting
 
@@ -147,8 +157,9 @@ For the full system to work, you need:
 - Review extension console for errors
 - Ensure Decision Agent URL in `config.js` matches server port
 
-**Decision Agent not forwarding to Master Agent?**
-- Verify Master Agent is running on port 9000
-- Check `MASTER_AGENT_URL` in Decision Agent config
-- Review Decision Agent logs for forwarding errors
+**Persuasion messages not appearing in cursor textbox?**
+- Verify Decision Agent is running: `curl http://localhost:8004/health`
+- Check extension console for errors
+- Ensure cursor textbox is enabled in extension settings
+- Review Decision Agent logs for message generation
 

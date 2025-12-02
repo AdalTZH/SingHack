@@ -4,7 +4,7 @@ The Decision Agent analyzes page sync data to determine if a user viewing a trav
 
 1. **Analyzes page content** to determine if it's travel-related
 2. **Decides if insurance might be needed** based on the travel activity
-3. **Automatically forwards prompts** to the Master Agent when insurance should be offered
+3. **Generates catchy persuasion messages** (max 20 words) displayed in the cursor textbox when insurance should be offered
 
 ## Overview
 
@@ -12,14 +12,14 @@ When a user browses web pages with the extension enabled, page sync data is sent
 
 - Quickly filters non-travel pages using keyword matching
 - Uses LLM analysis for nuanced decision-making on travel pages
-- Forwards insurance purchase prompts to the Master Agent when appropriate
+- Generates catchy persuasion messages (max 20 words) for cursor textbox display
 - Returns decision results with confidence scores and reasoning
 
 ## Features
 
 - **Fast filtering**: Quick keyword-based pre-filtering to skip non-travel pages
 - **LLM-powered decisions**: Uses OpenAI models for accurate travel-related and insurance need detection
-- **Automatic forwarding**: Seamlessly forwards insurance prompts to Master Agent
+- **Persuasion messages**: Generates catchy, short messages (max 20 words) displayed in cursor textbox
 - **Confidence scoring**: Provides confidence scores for decision transparency
 - **Non-intrusive**: Only prompts when confident insurance might be needed
 
@@ -43,8 +43,7 @@ OPENAI_MODEL=gpt-4o-mini
 DECISION_AGENT_HOST=0.0.0.0
 DECISION_AGENT_PORT=8004
 
-# Master Agent URL (for forwarding prompts)
-MASTER_AGENT_URL=http://localhost:9000
+# Note: Master Agent forwarding has been removed - persuasion messages are now displayed directly in cursor textbox
 
 # Decision Settings
 DECISION_TEMPERATURE=0.3
@@ -54,6 +53,31 @@ DECISION_CONFIDENCE_THRESHOLD=0.7
 
 ## Running the Server
 
+### Quick Start
+
+1. **Navigate to the decision_agent directory:**
+```bash
+cd Server/decision_agent
+```
+
+2. **Install dependencies (if not already installed):**
+```bash
+pip install -r requirements.txt
+```
+
+3. **Set your OpenAI API key:**
+```bash
+# Windows PowerShell
+$env:OPENAI_API_KEY="your_api_key_here"
+
+# Windows CMD
+set OPENAI_API_KEY=your_api_key_here
+
+# Linux/Mac
+export OPENAI_API_KEY=your_api_key_here
+```
+
+4. **Start the server:**
 ```bash
 python -m decision_agent.server
 ```
@@ -62,6 +86,34 @@ Or using uvicorn directly:
 
 ```bash
 uvicorn decision_agent.server:app --host 0.0.0.0 --port 8004 --reload
+```
+
+### Verify Server is Running
+
+Open your browser and visit:
+```
+http://localhost:8004/health
+```
+
+You should see:
+```json
+{
+  "status": "healthy",
+  "service": "Decision Agent API",
+  "version": "1.0.0"
+}
+```
+
+### Server Output
+
+When running successfully, you should see:
+```
+INFO:     Started server process
+INFO:     Waiting for application startup.
+INFO:     Initializing Decision Agent...
+INFO:     Decision Agent initialized successfully
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8004
 ```
 
 ## API Endpoints
@@ -90,7 +142,7 @@ Analyzes page sync data and determines if insurance should be offered.
   "is_travel_related": true,
   "insurance_needed": true,
   "travel_context": "international flight booking",
-  "forwarded_to_master": true
+  "persuasion_message": "Protect your adventure! Travel insurance = peace of mind ✈️"
 }
 ```
 
@@ -103,7 +155,7 @@ Health check endpoint.
 The Decision Agent is integrated with:
 
 1. **Chrome Extension** (`background.js`): Sends page sync data to Decision Agent
-2. **Master Agent**: Receives insurance prompts forwarded by Decision Agent
+2. **Cursor Textbox**: Displays persuasion messages when insurance should be offered
 
 ## Decision Logic
 
@@ -124,9 +176,9 @@ Chrome Extension (background.js)
     ↓ (page sync data)
 Decision Agent
     ↓ (if insurance needed)
-Master Agent
-    ↓ (insurance prompt)
-User
+Generates Persuasion Message (max 20 words)
+    ↓ (displays in cursor textbox)
+User sees message with streaming animation (10 seconds)
 ```
 
 ## Development
@@ -142,10 +194,21 @@ python -m pytest tests/
 uvicorn decision_agent.server:app --reload
 ```
 
+## Persuasion Messages
+
+The Decision Agent generates catchy, short persuasion messages (max 20 words) that are displayed in the cursor textbox when users visit travel-related pages. These messages:
+
+- Are concise and won't take up screen space
+- Are catchy and attention-grabbing
+- Focus on the specific travel activity
+- Create urgency or highlight value
+- Display for 10 seconds with streaming animation
+
 ## Notes
 
 - The Decision Agent does NOT generate summaries - it only makes decisions
-- Page content is truncated to 5000 characters for LLM analysis
-- The agent automatically forwards to Master Agent when `should_prompt` is True
+- Page content is truncated to 10,000 characters for LLM analysis
+- The agent generates persuasion messages (max 20 words) when `should_prompt` is True
+- Messages are displayed in the cursor textbox with streaming animation
 - Non-travel pages are filtered early to save API costs
 

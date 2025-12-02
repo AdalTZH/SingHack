@@ -1,269 +1,139 @@
-# Master Agent Server
+# Master Agent - Insurance Agent
 
-Central orchestration agent that routes user queries to specialized agents and synthesizes responses.
+A conversational insurance agent powered by LangGraph and GPT models. This agent provides expert insurance advice through a chat interface.
 
-## Overview
+## Features
 
-The Master Agent Server is a FastAPI application that acts as the central hub for the travel insurance AI system. It:
-
-1. Receives queries from the Chrome extension
-2. Routes queries to appropriate specialized agents (Classifier, Predict, Risk)
-3. Synthesizes agent responses into coherent answers
-4. Returns unified responses to the extension
+- **LangGraph-based workflow**: Uses LangGraph for state management and conversation flow
+- **GPT-powered**: Leverages OpenAI GPT models for natural language understanding and generation
+- **Insurance expertise**: Specialized in travel insurance, health insurance, and general insurance products
+- **Conversation history**: Supports multi-turn conversations with context retention
+- **RESTful API**: FastAPI-based server with `/chat` endpoint
 
 ## Architecture
 
-### Agent Communication (A2A Protocol)
-
-The Master Agent communicates with specialized agents via REST API:
-
-```
-Chrome Extension → Master Agent → Specialized Agents → Master Agent → Chrome Extension
-                        ↓
-                  LangGraph Orchestration
-```
-
-### Specialized Agents
-
-| Agent | Purpose | Port |
-|-------|---------|------|
-| **Classifier Agent** | Classifies queries into types | 8001 |
-| **Predict Agent** | Provides insurance recommendations | 8002 |
-| **Risk Agent** | Assesses travel risks | 8003 |
+The master agent is built using:
+- **LangGraph**: For workflow orchestration and state management
+- **LangChain**: For LLM integration
+- **FastAPI**: For HTTP API server
+- **OpenAI GPT**: For language model capabilities
 
 ## Installation
 
-### 1. Install Dependencies
-
+1. Install dependencies:
 ```bash
 cd Server/master_agent
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
-
-Create a `.env` file in the Server directory:
-
+2. Set up environment variables (create `.env` file in Server directory):
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o
 MASTER_AGENT_HOST=0.0.0.0
 MASTER_AGENT_PORT=9000
-TEMPERATURE=0.7
+MASTER_AGENT_TEMPERATURE=0.7
+MASTER_AGENT_MAX_TOKENS=2000
 ```
 
-### 3. Start the Server
+## Running the Server
 
+From the `Server` directory:
 ```bash
-python -m master_agent.server
+python start_master_agent.py
 ```
 
-Or using uvicorn directly:
-
+Or directly:
 ```bash
-uvicorn master_agent.server:app --host 0.0.0.0 --port 9000 --reload
+cd Server/master_agent
+python -m uvicorn master_agent.server:app --host 0.0.0.0 --port 9000 --reload
 ```
 
 ## API Endpoints
 
-### POST /chat
-
-Main chat endpoint for processing user queries.
-
-**Request:**
-```json
-{
-  "message": "Which insurance plan is best for skiing in Japan?",
-  "temperature": 0.7,
-  "context": {}
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "response": "Based on your skiing trip to Japan, I recommend...",
-  "classification": "recommendation",
-  "agents_consulted": ["predict", "risk"],
-  "metadata": {
-    "routing_decision": "predict"
-  }
-}
-```
-
-### GET /health
-
-Health check endpoint.
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "service": "Master Agent API",
-  "version": "1.0.0"
-}
-```
-
-### GET /agents
-
-List available specialized agents.
-
-**Response:**
-```json
-{
-  "agents": [
-    {
-      "name": "classifier",
-      "description": "Classifies user queries into types",
-      "capabilities": ["comparison", "explanation", "eligibility", "scenario"]
-    },
-    ...
-  ],
-  "total": 3
-}
-```
-
-## Workflow
-
-### 1. Query Routing
-
-The Master Agent analyzes the user query and determines which agent(s) to consult:
-
-- **Compare/Explain queries** → Classifier Agent
-- **Recommendation queries** → Predict Agent
-- **Risk assessment queries** → Risk Agent
-- **General queries** → All agents as needed
-
-### 2. Agent Orchestration
-
-Using LangGraph, the Master Agent:
-1. Routes the query to appropriate agents
-2. Waits for responses
-3. Synthesizes results
-
-### 3. Response Synthesis
-
-The Master Agent uses OpenAI to combine agent responses into:
-- Clear, coherent answers
-- Proper citations and reasoning
-- User-friendly explanations
-
-## Integration with Chrome Extension
-
-The Chrome extension sends POST requests to `/chat`:
-
-```javascript
-const response = await fetch('http://localhost:9000/chat', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    message: userMessage,
-    temperature: 0.7
-  })
-});
-
-const data = await response.json();
-console.log(data.response); // Display to user
-```
-
-## Development
-
-### Running Locally
-
+### Health Check
 ```bash
-# Start the server
-python -m master_agent.server
-
-# Server will be available at http://localhost:9000
+GET /health
 ```
 
-### Testing
-
+### Chat
 ```bash
-# Test health endpoint
-curl http://localhost:9000/health
+POST /chat
+Content-Type: application/json
 
-# Test chat endpoint
-curl -X POST http://localhost:9000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Which plan is best for Japan?"}'
+{
+    "message": "What does travel insurance cover?",
+    "temperature": 0.7,
+    "conversation_history": []
+}
 ```
 
-### Debugging
-
-Enable verbose logging:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
+**Response:**
+```json
+{
+    "success": true,
+    "response": "Travel insurance typically covers...",
+    "conversation_history": [
+        {
+            "user": "What does travel insurance cover?",
+            "assistant": "Travel insurance typically covers..."
+        }
+    ],
+    "metadata": {
+        "model": "gpt-4o",
+        "iterations": 1
+    }
+}
 ```
+
+## Integration with Extension
+
+The master agent is designed to work with the browser extension's chat interface. The extension sends requests to:
+- `http://localhost:9000/chat` (or configured `MASTER_AGENT_URL`)
 
 ## Configuration
 
 Key configuration options in `config.py`:
+- `OPENAI_MODEL`: GPT model to use (default: `gpt-4o`)
+- `TEMPERATURE`: Response creativity (default: `0.7`)
+- `MAX_TOKENS`: Maximum response length (default: `2000`)
+- `MAX_ITERATIONS`: Maximum workflow iterations (default: `15`)
 
-- `SERVER_HOST`: Server bind address (default: 0.0.0.0)
-- `SERVER_PORT`: Server port (default: 9000)
-- `OPENAI_MODEL`: LLM model for synthesis (default: gpt-4o-mini)
-- `TEMPERATURE`: Response creativity (default: 0.7)
-- `AGENT_URLS`: Base URLs for specialized agents
+## LangGraph Workflow
 
-## Architecture Diagram
+The agent uses a LangGraph workflow with:
+1. **Agent Node**: Processes messages and generates responses
+2. **Check Iterations Node**: Monitors iteration count
+3. **Conditional Edges**: Determines when to continue or end conversation
 
+## System Prompt
+
+The agent is configured with a specialized insurance agent system prompt that:
+- Establishes professional insurance expertise
+- Defines key areas of coverage
+- Sets tone and behavior expectations
+
+## Error Handling
+
+The agent includes comprehensive error handling:
+- LLM invocation errors
+- State management errors
+- API request/response errors
+
+## Development
+
+To modify the agent behavior:
+1. Update `INSURANCE_AGENT_SYSTEM_PROMPT` in `config.py`
+2. Modify workflow nodes in `master_agent.py`
+3. Adjust temperature and model settings
+
+## Testing
+
+Test the API using curl:
+```bash
+curl -X POST http://localhost:9000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is travel insurance?"}'
 ```
-┌─────────────────┐
-│ Chrome Extension│
-└────────┬────────┘
-         │ HTTP POST /chat
-         ↓
-┌──────────────────────────────────┐
-│      Master Agent (FastAPI)      │
-│  ┌────────────────────────────┐  │
-│  │   LangGraph Orchestration  │  │
-│  │                            │  │
-│  │  Route → Agents → Synthesize│  │
-│  └────────────────────────────┘  │
-└─────┬────────┬───────────┬───────┘
-      │        │           │
-      ↓        ↓           ↓
-┌──────────┐ ┌──────────┐ ┌──────────┐
-│Classifier│ │ Predict  │ │  Risk    │
-│ :8001    │ │ :8002    │ │ :8003    │
-└──────────┘ └──────────┘ └──────────┘
-```
 
-## Troubleshooting
-
-### Server Won't Start
-
-1. Check if port 9000 is available
-2. Verify OpenAI API key is set
-3. Ensure all dependencies are installed
-
-### Agent Communication Errors
-
-1. Verify specialized agents are running
-2. Check agent URLs in configuration
-3. Review network connectivity
-
-### Poor Responses
-
-1. Adjust temperature in configuration
-2. Enable debug logging to see agent responses
-3. Check LLM model availability and credits
-
-## Future Enhancements
-
-- [ ] Add caching for common queries
-- [ ] Implement streaming responses
-- [ ] Add user session management
-- [ ] Support for multi-turn conversations
-- [ ] Metrics and analytics
-- [ ] Rate limiting and throttling
-
-## License
-
-Part of SingHack Travel Insurance System
-
+Or use the FastAPI docs at `http://localhost:9000/docs`

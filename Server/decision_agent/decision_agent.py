@@ -9,8 +9,7 @@ import logging
 
 from .config import (
     OPENAI_API_KEY, OPENAI_MODEL, TEMPERATURE, MAX_TOKENS,
-    CONFIDENCE_THRESHOLD, TRAVEL_KEYWORDS, INSURANCE_KEYWORDS,
-    MASTER_AGENT_URL
+    CONFIDENCE_THRESHOLD, TRAVEL_KEYWORDS, INSURANCE_KEYWORDS
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -148,8 +147,6 @@ Your task is to make a DECISION, not generate summaries. Analyze the page HTML c
 1. Is this page travel-related? (flights, hotels, travel bookings, destinations, travel activities, etc.)
 2. Does this travel activity/booking potentially need insurance coverage? (international travel, adventure activities, expensive trips, cancellable bookings, etc.)
 
-IMPORTANT: If this is a payment page, checkout page, or the user is already purchasing insurance, set should_prompt to false. Do not prompt users who are already in the process of making a purchase.
-
 Page Information:
 URL: {url}
 Title: {title}
@@ -161,7 +158,7 @@ Page HTML Content:
 Based on this analysis, determine:
 - Is this travel-related? (yes/no)
 - Could this travel activity benefit from insurance? (yes/no)
-- Should the user be prompted about insurance purchase? (yes/no - MUST be false if user is already on payment/checkout page)
+- Should the user be prompted about insurance purchase? (yes/no - should be true if travel-related)
 
 Respond in this EXACT JSON format:
 {{
@@ -209,8 +206,14 @@ Only respond with the JSON object, no additional text."""
             is_travel_related = decision.get('is_travel_related', False)
             insurance_needed = decision.get('insurance_needed', False)
             
-            # Apply confidence threshold
-            if confidence < CONFIDENCE_THRESHOLD:
+            # Override: Always prompt if travel-related, regardless of payment/checkout status
+            if is_travel_related:
+                should_prompt = True
+                if decision.get('reasoning'):
+                    decision['reasoning'] = f"{decision.get('reasoning')} (Prompting enabled: page is travel-related)"
+            
+            # Apply confidence threshold (but don't override travel-related prompt)
+            if confidence < CONFIDENCE_THRESHOLD and not is_travel_related:
                 should_prompt = False
                 decision['reasoning'] = f"Confidence ({confidence:.2f}) below threshold ({CONFIDENCE_THRESHOLD})"
             
@@ -238,30 +241,94 @@ Only respond with the JSON object, no additional text."""
                 'error': str(e)
             }
     
-    def generate_insurance_prompt(self, decision_result: Dict[str, Any]) -> str:
+    def generate_persuasion_message(self, decision_result: Dict[str, Any]) -> str:
         """
-        Generate a prompt message to send to master agent for insurance purchase
+        Generate a compelling 1-liner persuasion message to display in cursor textbox
         
         Args:
             decision_result: Result from analyze_page()
             
         Returns:
-            Formatted prompt message for master agent
+            A single, persuasive line encouraging insurance purchase
         """
         travel_context = decision_result.get('travel_context', 'travel plans')
         url = decision_result.get('url', '')
         title = decision_result.get('title', '')
+        is_travel_related = decision_result.get('is_travel_related', False)
+        insurance_needed = decision_result.get('insurance_needed', False)
         
-        prompt = f"""Based on the user's current browsing activity, they appear to be planning or booking a trip.
+        # Extract key information from travel context
+        persuasion_prompt = f"""You are a travel insurance advisor. Based on the user's browsing activity, create a SINGLE, catchy one-liner to persuade them to purchase travel insurance.
 
 Travel Context: {travel_context}
 Page: {title}
 URL: {url}
+Travel-related: {is_travel_related}
+Insurance needed: {insurance_needed}
 
-The user is viewing a travel-related page and may benefit from travel insurance coverage. 
-Please provide a SHORT, CONCISE prompt (maximum 2 sentences, under 100 words) suggesting travel insurance.
+CRITICAL REQUIREMENTS:
+- Must be exactly ONE line (no line breaks)
+- Maximum 20 words (strict limit - count carefully)
+- CATCHY and memorable - use action words
+- Short and punchy - won't take up screen space
+- Focus on the specific travel activity or destination
+- Create urgency or highlight value
+- Friendly and professional tone
+- Make it snappy and attention-grabbing
 
-Keep it brief and friendly. Focus on the value of coverage for their trip type."""
+Examples of good catchy persuasion lines (all under 20 words):
+- "Protect your adventure! Travel insurance = peace of mind ✈️"
+- "Don't let surprises ruin your trip - get covered now!"
+- "Travel insurance: Your safety net for unexpected adventures"
+- "Secure your journey with travel insurance - worry-free travel awaits!"
+
+Generate ONLY the one-liner message, nothing else. No quotes, no explanations, just the message text. Remember: MAX 20 WORDS."""
+
+        try:
+            response = self.llm.invoke([
+                SystemMessage(content="You are a persuasive travel insurance advisor. Generate compelling, concise one-liners to encourage insurance purchases."),
+                HumanMessage(content=persuasion_prompt)
+            ])
+            
+            # Extract the message
+            message = response.content.strip()
+            
+            # Remove quotes if present
+            if message.startswith('"') and message.endswith('"'):
+                message = message[1:-1]
+            elif message.startswith("'") and message.endswith("'"):
+                message = message[1:-1]
+            
+            # Remove any markdown formatting
+            if message.startswith('```'):
+                lines = message.split('\n')
+                message = '\n'.join([line for line in lines if not line.strip().startswith('```')])
+            
+            # Take only the first line and limit to 20 words
+            message = message.split('\n')[0].strip()
+            words = message.split()
+            original_word_count = len(words)
+            
+            if original_word_count > 20:
+                # Truncate to 20 words
+                message = ' '.join(words[:20])
+                # Remove trailing punctuation if it looks incomplete
+                if message and message[-1] in [',', ';', ':']:
+                    message = message[:-1].strip()
+                logger.warning(f"Message exceeded 20 words ({original_word_count} words), truncated to 20 words")
+            
+            final_word_count = len(message.split())
+            logger.info(f"Generated persuasion message ({final_word_count} words): {message}")
+            return message
         
-        return prompt
+        except Exception as e:
+            logger.error(f"Error generating persuasion message: {e}")
+            # Fallback message (max 20 words, catchy)
+            if travel_context:
+                # Try to keep it short and catchy
+                context_words = travel_context.split()[:3]  # Take first 3 words max
+                context_short = ' '.join(context_words)
+                return f"Protect your {context_short} with travel insurance! ✈️"
+            else:
+                return "Secure your trip with travel insurance - peace of mind awaits!"
 

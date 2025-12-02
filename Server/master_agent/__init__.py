@@ -1,9 +1,8 @@
 """
-Master Agent Package
-Central orchestration agent that routes queries to specialized agents
+Master Agent - Insurance Agent powered by LangGraph
+Provides conversational insurance assistance via chat interface
 """
 
-from .master_agent import MasterAgent
 
-__all__ = ['MasterAgent']
+
 

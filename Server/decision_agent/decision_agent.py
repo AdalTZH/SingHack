@@ -40,21 +40,21 @@ class DecisionAgent:
             temperature=TEMPERATURE
         )
     
-    def _is_stripe_payment_page(self, url: str, title: str, html_content: str) -> bool:
+    def _is_stripe_payment_page(self, url: str, title: str, inner_text: str) -> bool:
         """
         Check if the current page is a Stripe payment/checkout page
         
         Args:
             url: Page URL
             title: Page title
-            html_content: Page HTML content
+            inner_text: Page text content
             
         Returns:
             True if this is a Stripe payment page
         """
         url_lower = url.lower()
         title_lower = title.lower()
-        content_lower = html_content.lower()[:1000]  # Check first 1000 chars for speed
+        content_lower = inner_text.lower()[:1000]  # Check first 1000 chars for speed
         
         # Stripe URL patterns
         stripe_domains = [
@@ -103,16 +103,16 @@ class DecisionAgent:
         
         return has_travel_keywords
     
-    def analyze_page(self, url: str, title: str, html_content: str) -> Dict[str, Any]:
+    def analyze_page(self, url: str, title: str, inner_text: str) -> Dict[str, Any]:
         """
         Analyze page content to determine if travel insurance might be needed
         
-        Always sends HTML content to LLM for analysis, regardless of quick filter results.
+        Always sends text content to LLM for analysis, regardless of quick filter results.
         
         Args:
             url: Page URL
             title: Page title
-            html_content: Page HTML/text content (may be truncated)
+            inner_text: Page text content (innerText from browser, may be truncated)
             
         Returns:
             Dictionary with decision and reasoning
@@ -121,7 +121,7 @@ class DecisionAgent:
         
         # Early exit: Skip analysis if user is on Stripe payment page
         # They're already purchasing insurance, no need to prompt again
-        if self._is_stripe_payment_page(url, title, html_content):
+        if self._is_stripe_payment_page(url, title, inner_text):
             logger.info(f"Skipping insurance prompt - user is on Stripe payment page: {url}")
             return {
                 'should_prompt': False,
@@ -135,15 +135,15 @@ class DecisionAgent:
                 'skipped_reason': 'stripe_payment_page'
             }
         
-        # Always use LLM for analysis - send HTML content to LLM for decision making
-        # Truncate HTML to reasonable size for API (increase limit since we're always using LLM)
-        html_truncated = html_content[:10000]  # Increased to 10k chars for better analysis
-        if len(html_content) > 10000:
-            logger.info(f"HTML content truncated from {len(html_content)} to 10000 characters")
+        # Always use LLM for analysis - send text content to LLM for decision making
+        # Truncate text to reasonable size for API (increase limit since we're always using LLM)
+        text_truncated = inner_text[:10000]  # Increased to 10k chars for better analysis
+        if len(inner_text) > 10000:
+            logger.info(f"Text content truncated from {len(inner_text)} to 10000 characters")
         
         decision_prompt = f"""You are a decision-making agent that analyzes web pages to determine if a user viewing a travel-related page might benefit from travel insurance.
 
-Your task is to make a DECISION, not generate summaries. Analyze the page HTML content and decide:
+Your task is to make a DECISION, not generate summaries. Analyze the page text content and decide:
 1. Is this page travel-related? (flights, hotels, travel bookings, destinations, travel activities, etc.)
 2. Does this travel activity/booking potentially need insurance coverage? (international travel, adventure activities, expensive trips, cancellable bookings, etc.)
 
@@ -151,9 +151,9 @@ Page Information:
 URL: {url}
 Title: {title}
 
-Page HTML Content:
-{html_truncated}
-{f'\n[... content truncated, original length: {len(html_content)} characters ...]' if len(html_content) > 10000 else ''}
+Page Text Content:
+{text_truncated}
+{f'\n[... content truncated, original length: {len(inner_text)} characters ...]' if len(inner_text) > 10000 else ''}
 
 Based on this analysis, determine:
 - Is this travel-related? (yes/no)

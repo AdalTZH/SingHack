@@ -54,6 +54,11 @@ SERVERS = {
         "script": "start_policy_analyzer_mcp.py",
         "port": None,  # MCP server doesn't use HTTP port
         "name": "Policy Analyzer MCP"
+    },
+    "summary_agent": {
+        "script": "start_summary_agent.py",
+        "port": 8020,
+        "name": "Summary Agent"
     }
 }
 

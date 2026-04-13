@@ -44,7 +44,7 @@ class PageSyncRequest(BaseModel):
     """Request model for page sync analysis"""
     url: str = Field(..., description="Page URL")
     title: str = Field(..., description="Page title")
-    html_content: str = Field(..., description="Page HTML/text content")
+    inner_text: str = Field(..., description="Page text content (innerText from browser)")
     timestamp: Optional[str] = Field(None, description="Timestamp of page sync")
     
     class Config:
@@ -52,7 +52,7 @@ class PageSyncRequest(BaseModel):
             "example": {
                 "url": "https://example.com/flight-booking",
                 "title": "Flight Booking - Example Airlines",
-                "html_content": "Book your flight...",
+                "inner_text": "Book your flight to Tokyo...",
                 "timestamp": "2024-01-01T12:00:00Z"
             }
         }
@@ -68,6 +68,7 @@ class PageSyncResponse(BaseModel):
     insurance_needed: bool = Field(..., description="Whether insurance might be needed")
     travel_context: Optional[str] = Field(None, description="Type of travel activity")
     persuasion_message: Optional[str] = Field(None, description="1-liner persuasion message (max 20 words) to display in cursor textbox")
+    inner_text: Optional[str] = Field(None, description="Truncated page content (10k chars) for Summary Agent")
     error: Optional[str] = None
     
     class Config:
@@ -153,15 +154,40 @@ async def analyze_page_sync(request: PageSyncRequest):
     4. Returns the decision and persuasion message to display in cursor textbox
     
     Args:
-        request: Page sync data (URL, title, HTML content)
+        request: Page sync data (URL, title, innerText content)
         
     Returns:
         Decision result with persuasion message for cursor textbox display
     """
     global decision_agent
     
+    # Print immediately when endpoint is called
+    print("\n" + "="*80)
+    print("🚀 DECISION AGENT - ENDPOINT CALLED")
+    print("="*80)
+    
     if not decision_agent:
+        print("❌ ERROR: Decision Agent not initialized!")
         raise HTTPException(status_code=503, detail="Decision Agent not initialized")
+    
+    # Log received request for debugging
+    logger.info(f"Received request - URL: {request.url}, Title: {request.title}, Text length: {len(request.inner_text) if request.inner_text else 0}")
+    
+    # Print innerText to terminal
+    print("📄 DECISION AGENT - RECEIVED PAGE CONTENT")
+    print("="*80)
+    print(f"URL: {request.url}")
+    print(f"Title: {request.title}")
+    print(f"Timestamp: {request.timestamp}")
+    print(f"Text Length: {len(request.inner_text) if request.inner_text else 0} characters")
+    print("-"*80)
+    print("INNER TEXT CONTENT:")
+    print("-"*80)
+    if request.inner_text:
+        print(request.inner_text)
+    else:
+        print("(empty)")
+    print("="*80 + "\n")
     
     logger.info(f"Analyzing page sync: {request.title} ({request.url})")
     
@@ -170,7 +196,7 @@ async def analyze_page_sync(request: PageSyncRequest):
         decision_result = decision_agent.analyze_page(
             url=request.url,
             title=request.title,
-            html_content=request.html_content
+            inner_text=request.inner_text
         )
         
         # If decision is to prompt, generate persuasion message for cursor textbox
@@ -204,8 +230,11 @@ async def analyze_page_sync(request: PageSyncRequest):
                 persuasion_message = "Secure your trip with travel insurance - peace of mind awaits!"
             logger.warning(f"Persuasion message was None but should_prompt=True, using fallback: {persuasion_message}")
         
+        # Get truncated inner_text for Summary Agent (10k chars)
+        truncated_inner_text = request.inner_text[:10000] if request.inner_text else ""
+        
         # Log the response being sent
-        logger.info(f"Returning response: should_prompt={decision_result.get('should_prompt', False)}, persuasion_message={persuasion_message}")
+        logger.info(f"Returning response: should_prompt={decision_result.get('should_prompt', False)}, persuasion_message={persuasion_message}, inner_text_length={len(truncated_inner_text)}")
         
         response = PageSyncResponse(
             success=True,
@@ -215,7 +244,8 @@ async def analyze_page_sync(request: PageSyncRequest):
             is_travel_related=decision_result.get('is_travel_related', False),
             insurance_needed=decision_result.get('insurance_needed', False),
             travel_context=decision_result.get('travel_context'),
-            persuasion_message=persuasion_message
+            persuasion_message=persuasion_message,
+            inner_text=truncated_inner_text
         )
         
         # Double-check the response has persuasion_message

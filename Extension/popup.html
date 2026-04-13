@@ -1,210 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat Assistant - Page Sync</title>
-    <style>
-        /* Popup-specific styles */
-        body {
-            width: 320px;
-            padding: 16px;
-            margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        }
-        .popup-header {
-            margin-bottom: 16px;
-        }
-        .popup-header h2 {
-            margin: 0 0 4px 0;
-            font-size: 18px;
-            font-weight: 600;
-        }
-        .popup-header p {
-            margin: 0;
-            font-size: 12px;
-            color: #666;
-        }
-        .consent-section {
-            margin-bottom: 20px;
-        }
-        .toggle-container {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        .toggle-label {
-            flex: 1;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        .toggle-switch {
-            position: relative;
-            width: 44px;
-            height: 24px;
-            background-color: #ccc;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        .toggle-switch.active {
-            background-color: #4CAF50;
-        }
-        .toggle-switch::after {
-            content: '';
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background-color: white;
-            top: 2px;
-            left: 2px;
-            transition: transform 0.3s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-        .toggle-switch.active::after {
-            transform: translateX(20px);
-        }
-        .privacy-notice {
-            font-size: 11px;
-            color: #888;
-            line-height: 1.4;
-            padding: 12px;
-            background-color: #f5f5f5;
-            border-radius: 6px;
-        }
-        .privacy-notice strong {
-            color: #333;
-        }
-        .log-section {
-            border-top: 1px solid #e0e0e0;
-            padding-top: 16px;
-        }
-        .log-section h3 {
-            margin: 0 0 12px 0;
-            font-size: 14px;
-            font-weight: 600;
-        }
-        .log-item {
-            font-size: 12px;
-            color: #666;
-        }
-        .log-item strong {
-            color: #333;
-            display: block;
-            margin-bottom: 4px;
-        }
-        .log-url {
-            word-break: break-all;
-            font-size: 11px;
-            color: #888;
-            margin-top: 4px;
-        }
-        .open-sidepanel-btn {
-            width: 100%;
-            padding: 10px;
-            margin-top: 16px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: background-color 0.2s;
-        }
-        .open-sidepanel-btn:hover {
-            background-color: #0056b3;
-        }
-        .singpass-section {
-            padding: 20px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        .singpass-section h3 {
-            color: #333;
-            margin: 0 0 12px 0;
-            font-size: 16px;
-            font-weight: 600;
-        }
-        .singpass-section p {
-            color: #666;
-            margin: 0 0 16px 0;
-            font-size: 12px;
-        }
-        .qr-code-container {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 16px;
-        }
-        .qr-code-wrapper {
-            background: white;
-            padding: 12px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-        .singpass-logo-container {
-            display: flex;
-            justify-content: center;
-            margin-top: 12px;
-        }
-        .singpass-logo {
-            height: 32px;
-            width: auto;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SingPass Insurance Chat</title>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div class="popup-header">
-        <h2>Page Sync Settings</h2>
-        <p>Control automatic page content synchronization</p>
+  <div class="popup-container">
+    <div class="logo-section">
+      <img src="QR_code.svg" alt="QR Code" class="qr-code" />
+      <img src="singpass_logo_fullcolour.png" alt="SingPass Logo" class="singpass-logo" />
     </div>
-    
-    <div class="singpass-section">
-        <h3>Verify Your Identity</h3>
-        <p>Scan with Singpass to authenticate</p>
-        <div class="qr-code-container">
-            <div class="qr-code-wrapper">
-                <img src="./src/assets/qr-code.svg" alt="QR Code" width="150" height="150" />
-            </div>
-        </div>
-        <div class="singpass-logo-container">
-            <img src="icons/singpass_logo_fullcolour.png" alt="Singpass" class="singpass-logo" />
-        </div>
-    </div>
-    
-    <div class="consent-section">
-        <div class="toggle-container">
-            <label class="toggle-label" for="enableSync">Enable page-sync</label>
-            <div class="toggle-switch" id="toggleSwitch" role="switch" aria-checked="false" tabindex="0">
-                <input type="checkbox" id="enableSync" style="display: none;" aria-label="Enable page sync">
-            </div>
-        </div>
-        
-        <div class="toggle-container">
-            <label class="toggle-label" for="enableCursorTextBox">Enable cursor textbox</label>
-            <div class="toggle-switch" id="cursorTextBoxToggle" role="switch" aria-checked="true" tabindex="0">
-                <input type="checkbox" id="enableCursorTextBox" style="display: none;" aria-label="Enable cursor textbox" checked>
-            </div>
-        </div>
-        
-        <div class="privacy-notice">
-            <strong>Privacy Notice:</strong> When enabled, this feature will send the current page's HTML content, URL, title, and timestamp to OpenAI API. No data is sent unless you explicitly enable this feature.
-        </div>
-    </div>
-    
-    <div class="log-section">
-        <h3>Last Sent</h3>
-        <div class="log-item">
-            <strong id="lastSentTime">Never</strong>
-            <div class="log-url" id="lastSentUrl"></div>
-        </div>
-    </div>
-    
-    <button class="open-sidepanel-btn" id="openSidepanelBtn">Open Chat Assistant</button>
-    
-    <script src="popup.js"></script>
+    <button id="enterChatBtn" class="enter-chat-btn">Enter Chat</button>
+  </div>
+  <script src="popup.js"></script>
 </body>
 </html>
+
+
 

@@ -49,11 +49,13 @@ class AgentState(TypedDict):
     - conversation_history: Derived summary format for external API compatibility
     - iteration_count: Number of agent iterations in current workflow run
     - document_summaries: List of document summaries from uploaded PDFs
+    - page_summaries: List of page summaries from browsed travel pages
     """
     messages: Annotated[List[BaseMessage], add_messages]
     conversation_history: List[Dict[str, str]]
     iteration_count: int
     document_summaries: Optional[List[Dict[str, Any]]]
+    page_summaries: Optional[List[Dict[str, Any]]]
 
 
 class MasterAgent:
@@ -154,15 +156,16 @@ class MasterAgent:
         
         return workflow
     
-    def _build_system_prompt(self, document_summaries: Optional[List[Dict[str, Any]]] = None) -> str:
+    def _build_system_prompt(self, document_summaries: Optional[List[Dict[str, Any]]] = None, page_summaries: Optional[List[Dict[str, Any]]] = None) -> str:
         """
-        Build system prompt with optional document context
+        Build system prompt with optional document and page browsing context
         
         Args:
             document_summaries: List of document summaries from uploaded PDFs
+            page_summaries: List of page summaries from browsed travel pages
             
         Returns:
-            Enhanced system prompt with document context
+            Enhanced system prompt with document and browsing context
         """
         system_prompt = INSURANCE_AGENT_SYSTEM_PROMPT
         
@@ -194,6 +197,32 @@ class MasterAgent:
             
             system_prompt = system_prompt + document_context
         
+        # Add page browsing context if summaries are available
+        if page_summaries and len(page_summaries) > 0:
+            page_context = "\n\n=== USER'S BROWSING ACTIVITY ===\n"
+            page_context += "The user has been browsing travel-related pages. Use this information to provide personalized insurance recommendations based on their travel plans:\n\n"
+            
+            for idx, page_summary in enumerate(page_summaries, 1):
+                title = page_summary.get('title', f'Page {idx}')
+                url = page_summary.get('url', '')
+                summary = page_summary.get('summary', '')
+                travel_context = page_summary.get('travel_context', '')
+                
+                page_context += f"Travel Page {idx}: {title}\n"
+                if travel_context:
+                    page_context += f"Type: {travel_context}\n"
+                page_context += f"URL: {url}\n"
+                page_context += f"Details:\n{summary}\n\n"
+            
+            page_context += "When recommending insurance:\n"
+            page_context += "- Reference specific travel plans from their browsing history\n"
+            page_context += "- Tailor recommendations to their destinations and activities\n"
+            page_context += "- Mention specific booking details if relevant (dates, flights, hotels)\n"
+            page_context += "- Provide personalized advice based on their travel type and destination\n"
+            page_context += "- Explain why certain coverage is important for their specific plans\n"
+            
+            system_prompt = system_prompt + page_context
+        
         return system_prompt
     
     def _agent_node(self, state: AgentState) -> AgentState:
@@ -210,8 +239,9 @@ class MasterAgent:
             # Get messages from state (add_messages reducer handles merging)
             messages = state.get("messages", [])
             
-            # Get document summaries from state
+            # Get document summaries and page summaries from state
             document_summaries = state.get("document_summaries")
+            page_summaries = state.get("page_summaries")
             
             # Get the last user message for logging
             last_user_msg = None
@@ -225,9 +255,11 @@ class MasterAgent:
                 print(f"📝 User input: {last_user_msg[:100]}...")
                 if document_summaries:
                     print(f"📄 Document summaries available: {len(document_summaries)} document(s)")
+                if page_summaries:
+                    print(f"🌐 Page summaries available: {len(page_summaries)} page(s)")
             
-            # Build system prompt with document context
-            system_prompt = self._build_system_prompt(document_summaries)
+            # Build system prompt with document and page context
+            system_prompt = self._build_system_prompt(document_summaries, page_summaries)
             
             # Prepare messages for LLM (include enhanced system prompt)
             llm_messages = [SystemMessage(content=system_prompt)]
@@ -315,7 +347,8 @@ class MasterAgent:
                 "messages": [response],  # add_messages will merge this with existing messages
                 "conversation_history": conversation_history,
                 "iteration_count": state.get("iteration_count", 0) + 1,
-                "document_summaries": state.get("document_summaries")  # Preserve document summaries
+                "document_summaries": state.get("document_summaries"),  # Preserve document summaries
+                "page_summaries": state.get("page_summaries")  # Preserve page summaries
             }
         
         except Exception as e:
@@ -329,7 +362,8 @@ class MasterAgent:
                 "messages": [error_message],  # add_messages will merge this
                 "conversation_history": conversation_history,
                 "iteration_count": state.get("iteration_count", 0) + 1,
-                "document_summaries": state.get("document_summaries")  # Preserve document summaries
+                "document_summaries": state.get("document_summaries"),  # Preserve document summaries
+                "page_summaries": state.get("page_summaries")  # Preserve page summaries
             }
     
     def _check_iterations_node(self, state: AgentState) -> AgentState:
@@ -432,7 +466,7 @@ class MasterAgent:
         
         return conversation_history
     
-    def chat(self, message: str, conversation_history: List[Dict[str, str]] = None, document_summaries: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    def chat(self, message: str, conversation_history: List[Dict[str, str]] = None, document_summaries: Optional[List[Dict[str, Any]]] = None, page_summaries: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Process a chat message and generate a response
         
@@ -446,6 +480,8 @@ class MasterAgent:
                                  This will be converted to messages and added to state
             document_summaries: List of document summaries from uploaded PDFs (optional)
                                Each summary should have: file_name, summary, text, metadata
+            page_summaries: List of page summaries from browsed travel pages (optional)
+                           Each summary should have: summary, url, title, travel_context, metadata
             
         Returns:
             Dictionary with response and metadata including updated conversation history
@@ -471,7 +507,8 @@ class MasterAgent:
                 "messages": messages,  # Full chat history stored here
                 "conversation_history": conversation_history or [],
                 "iteration_count": 0,
-                "document_summaries": document_summaries or []  # Include document summaries
+                "document_summaries": document_summaries or [],  # Include document summaries
+                "page_summaries": page_summaries or []  # Include page summaries
             }
             
             # Log document summaries for debugging
@@ -481,6 +518,14 @@ class MasterAgent:
                     print(f"   Doc {idx}: {doc.get('file_name', 'Unknown')} - Summary: {bool(doc.get('summary'))}, Text: {bool(doc.get('text'))}")
             else:
                 print("📄 No document summaries provided in chat request")
+            
+            # Log page summaries for debugging
+            if page_summaries:
+                print(f"🌐 Initializing state with {len(page_summaries)} page summary(ies)")
+                for idx, page in enumerate(page_summaries, 1):
+                    print(f"   Page {idx}: {page.get('title', 'Unknown')} - Summary: {bool(page.get('summary'))}")
+            else:
+                print("🌐 No page summaries provided in chat request")
             
             # Run the workflow - messages will be accumulated via add_messages reducer
             result = self.app.invoke(initial_state)

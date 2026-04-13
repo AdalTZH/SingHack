@@ -10,10 +10,18 @@ import boto3
 import uuid
 from datetime import datetime
 from dotenv import load_dotenv
+from typing import Optional, Dict
+import threading
+import time
 
 load_dotenv()
 
 app = FastAPI(title="LEA Payment Pages", version="1.0.0")
+
+# In-memory store for pending payments (for extension polling)
+# Format: {payment_intent_id: {checkout_url, policy_name, premium, created_at, claimed}}
+pending_payments: Dict[str, Dict] = {}
+pending_payments_lock = threading.Lock()
 
 # CORS middleware to allow extension to call API
 app.add_middleware(
@@ -43,9 +51,132 @@ class PaymentRequest(BaseModel):
     product_name: str = "Travel Insurance - Standard Plan"
     currency: str = "SGD"
 
+class TriggerPaymentRequest(BaseModel):
+    policy_name: str
+    premium: float  # Premium amount in dollars (will be converted to cents)
+    currency: str = "SGD"
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "payment-pages"}
+
+@app.post("/trigger-payment")
+async def trigger_payment(payment_request: TriggerPaymentRequest):
+    """
+    Endpoint for MCP to trigger payment creation
+    Accepts policy_name and premium, creates Stripe checkout session
+    and stores it for the extension to retrieve
+    """
+    try:
+        # Convert premium from dollars to cents
+        amount_cents = int(payment_request.premium * 100)
+        
+        # Generate unique payment intent ID
+        payment_intent_id = f"payment_{uuid.uuid4().hex[:12]}"
+        user_id = f"user_{uuid.uuid4().hex[:8]}"
+        
+        # Create payment record in DynamoDB
+        payment_record = {
+            'payment_intent_id': payment_intent_id,
+            'user_id': user_id,
+            'payment_status': 'pending',
+            'amount': amount_cents,
+            'currency': payment_request.currency,
+            'product_name': payment_request.policy_name,
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        payments_table.put_item(Item=payment_record)
+        
+        # Create Stripe checkout session
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': payment_request.currency.lower(),
+                    'unit_amount': amount_cents,
+                    'product_data': {
+                        'name': payment_request.policy_name,
+                        'description': 'Travel Insurance Policy',
+                    },
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=f'http://localhost:8085/success?session_id={{CHECKOUT_SESSION_ID}}',
+            cancel_url='http://localhost:8085/cancel',
+            client_reference_id=payment_intent_id,
+        )
+        
+        # Update payment record with Stripe session ID
+        payments_table.update_item(
+            Key={'payment_intent_id': payment_intent_id},
+            UpdateExpression='SET stripe_session_id = :sid',
+            ExpressionAttributeValues={':sid': checkout_session.id}
+        )
+        
+        # Store in pending payments for extension to retrieve
+        with pending_payments_lock:
+            pending_payments[payment_intent_id] = {
+                'checkout_url': checkout_session.url,
+                'session_id': checkout_session.id,
+                'policy_name': payment_request.policy_name,
+                'premium': payment_request.premium,
+                'amount_cents': amount_cents,
+                'currency': payment_request.currency,
+                'created_at': datetime.utcnow().isoformat(),
+                'claimed': False
+            }
+        
+        return JSONResponse({
+            "success": True,
+            "payment_intent_id": payment_intent_id,
+            "checkout_url": checkout_session.url,
+            "session_id": checkout_session.id,
+            "message": "Payment checkout created successfully. Extension will retrieve it."
+        })
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+@app.get("/get-pending-payment")
+async def get_pending_payment():
+    """
+    Endpoint for extension to poll for pending payments
+    Returns the first unclaimed pending payment
+    """
+    try:
+        with pending_payments_lock:
+            # Find first unclaimed payment
+            for payment_id, payment_data in pending_payments.items():
+                if not payment_data.get('claimed', False):
+                    # Mark as claimed
+                    payment_data['claimed'] = True
+                    return JSONResponse({
+                        "has_payment": True,
+                        "payment_intent_id": payment_id,
+                        "checkout_url": payment_data['checkout_url'],
+                        "session_id": payment_data['session_id'],
+                        "policy_name": payment_data['policy_name'],
+                        "premium": payment_data['premium'],
+                        "amount_cents": payment_data['amount_cents'],
+                        "currency": payment_data['currency']
+                    })
+            
+            # No pending payments
+            return JSONResponse({
+                "has_payment": False,
+                "message": "No pending payments"
+            })
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"has_payment": False, "error": str(e)}
+        )
 
 @app.post("/create-checkout")
 async def create_checkout(payment_request: PaymentRequest):

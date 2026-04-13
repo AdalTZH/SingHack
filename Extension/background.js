@@ -1,614 +1,288 @@
-// Background Service Worker
-
-// Import configuration from external file
-importScripts('config.js');
-
-// Model configuration
-const DEFAULT_MODEL = 'gpt-4o-mini';
+// Background service worker for Chrome extension
 
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('AI Chat Assistant installed');
+  console.log('SingPass Insurance Chat extension installed');
 });
 
-// Listen for messages from sidepanel
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'chat') {
-        handleChatMessage(request)
-            .then(response => sendResponse(response))
-            .catch(error => {
-                console.error('Chat error:', error);
-                sendResponse({ error: error.message || 'An error occurred' });
-            });
-        return true; // Indicates we'll send a response asynchronously
-    }
-    
-    if (request.type === 'captureScreenshot') {
-        handleCaptureScreenshot(request)
-            .then(response => sendResponse(response))
-            .catch(error => {
-                console.error('Screenshot capture error:', error);
-                sendResponse({ error: error.message || 'Failed to capture screenshot' });
-            });
-        return true; // Indicates we'll send a response asynchronously
-    }
-    
-    if (request.type === 'speech-to-text') {
-        handleSpeechToText(request)
-            .then(response => sendResponse(response))
-            .catch(error => {
-                console.error('Speech-to-text error:', error);
-                sendResponse({ success: false, error: error.message || 'Speech transcription failed' });
-            });
-        return true; // Indicates we'll send a response asynchronously
-    }
+// Handle side panel opening
+chrome.sidePanel.setOptions({
+  path: 'sidepanel.html',
+  enabled: true
 });
 
-// Handle chat message - supports both Master Agent and direct OpenAI
-async function handleChatMessage(request) {
-    const { message, temperature, image } = request;
-    
-    // Check if we should use Master Agent or direct OpenAI
-    const useMasterAgent = CONFIG.USE_MASTER_AGENT === true;
-    
-    if (useMasterAgent) {
-        return handleMasterAgentChat(request);
-    } else {
-        return handleDirectOpenAIChat(request);
-    }
-}
-
-// Handle speech-to-text conversion
-async function handleSpeechToText(request) {
-    const { audio_data, format } = request;
-    
+// Helper function to inject content script if needed
+async function injectContentScriptIfNeeded(tabId, url) {
+  try {
+    // First, check if content script is already loaded by trying to send a ping
     try {
-        const masterAgentUrl = CONFIG.MASTER_AGENT_URL || 'http://localhost:9000';
-        
-        const response = await fetch(`${masterAgentUrl}/speech-to-text`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                audio_data: audio_data,
-                format: format || 'webm'
-            })
+      await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+      console.log('Content script already loaded on tab:', url);
+      return true;
+    } catch (pingError) {
+      // Content script not loaded, need to inject it
+      console.log('Content script not loaded, injecting for tab:', url);
+      
+      try {
+        // Inject CSS first
+        await chrome.scripting.insertCSS({
+          target: { tabId: tabId },
+          files: ['cursor-textbox.css']
         });
         
-        if (!response.ok) {
-            throw new Error(`Speech-to-text returned ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            return {
-                success: true,
-                text: data.text
-            };
-        } else {
-            throw new Error(data.error || 'Speech-to-text returned error');
-        }
-    } catch (error) {
-        console.error('Speech-to-text error:', error);
-        throw error;
-    }
-}
-
-// Handle chat message via Master Agent
-async function handleMasterAgentChat(request) {
-    const { message, temperature, image } = request;
-    
-    try {
-        // Note: Images not yet supported in Master Agent mode
-        if (image) {
-            throw new Error('Image analysis not yet supported in Master Agent mode');
-        }
-        
-        const masterAgentUrl = CONFIG.MASTER_AGENT_URL || 'http://localhost:9000';
-        
-        const response = await fetch(`${masterAgentUrl}/chat`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                message: message,
-                temperature: temperature
-            })
+        // Then inject JS
+        await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          files: ['content.js']
         });
         
-        if (!response.ok) {
-            throw new Error(`Master Agent returned ${response.status}`);
-        }
+        console.log('Successfully injected content script for tab:', url);
         
-        const data = await response.json();
-        
-        if (data.success) {
-            return {
-                message: data.response,
-                metadata: data
-            };
-        } else {
-            throw new Error(data.error || 'Master Agent returned error');
-        }
-    } catch (error) {
-        console.error('Master Agent error:', error);
-        throw error;
-    }
-}
-
-// Handle chat message via direct OpenAI API
-async function handleDirectOpenAIChat(request) {
-    const { message, temperature, image } = request;
-    
-    // Use the API key from config file and default model
-    const apiKey = CONFIG.OPENAI_API_KEY;
-    const model = DEFAULT_MODEL;
-    
-    if (!apiKey || apiKey === 'YOUR_API_KEY_HERE' || !apiKey.startsWith('sk-')) {
-        throw new Error('Invalid API key. Please configure your API key in config.js');
-    }
-    
-    try {
-        // Build the message content - support both text and image
-        let messageContent;
-        
-        if (image) {
-            // If image is provided, use the content array format with image_url
-            messageContent = [
-                {
-                    type: 'text',
-                    text: message
-                },
-                {
-                    type: 'image_url',
-                    image_url: {
-                        url: image
-                    }
-                }
-            ];
-        } else {
-            // Text-only message
-            messageContent = message;
-        }
-        
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: model,
-                messages: [
-                    {
-                        role: 'user',
-                        content: messageContent
-                    }
-                ],
-                temperature: temperature,
-                max_tokens: 1000
-            })
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error?.message || 'Failed to get response from OpenAI');
-        }
-        
-        const data = await response.json();
-        return {
-            message: data.choices[0].message.content.trim()
-        };
-    } catch (error) {
-        console.error('OpenAI API error:', error);
-        throw error;
-    }
-}
-
-// Handle screenshot capture request
-async function handleCaptureScreenshot(request) {
-    try {
-        // Get the tab - use provided tabId or query for active tab
-        let tab;
-        if (request.tabId) {
-            tab = await chrome.tabs.get(request.tabId);
-        } else {
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            tab = tabs[0];
-        }
-        
-        if (!tab) {
-            throw new Error('No active tab found');
-        }
-        
-        // Check if URL is accessible (not chrome:// etc.)
-        if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension:'))) {
-            throw new Error('Cannot capture screenshot of browser internal pages');
-        }
-        
-        // Get the window that contains this tab for captureVisibleTab
-        const window = await chrome.windows.get(tab.windowId);
-        if (!window) {
-            throw new Error('Unable to access window');
-        }
-        
-        // Capture screenshot of the visible tab
-        // Note: activeTab permission should work when extension is invoked by user action
-        // However, if called from sidepanel, it may require <all_urls> in host_permissions
-        // See comment below for alternative if this fails
-        const dataUrl = await chrome.tabs.captureVisibleTab(window.id, { format: 'png' });
-        
-        return {
-            dataUrl: dataUrl
-        };
-    } catch (error) {
-        // Check if it's a permission error
-        if (error.message && (error.message.includes('permission') || error.message.includes('<all_urls>') || error.message.includes('activeTab'))) {
-            throw new Error('Screenshot permission denied. The extension needs permission to capture screenshots. You may need to add host permissions to the manifest.');
-        }
-        throw error;
-    }
-}
-
-// Open side panel when extension icon is clicked (only if popup doesn't handle it)
-chrome.action.onClicked.addListener((tab) => {
-    chrome.sidePanel.open({ tabId: tab.id });
-});
-
-// ============================================================================
-// PAGE SYNC FUNCTIONALITY
-// ============================================================================
-// This feature monitors tab switches and URL changes, then sends page HTML 
-// to OpenAI API. User consent is required before any data is sent.
-// PRIVACY: This feature sends page HTML, URL, title, and timestamp to OpenAI.
-// ============================================================================
-
-// Configuration
-const DEBOUNCE_DELAY_MS = 5000; // Minimum 5 seconds between sends per tab
-const HTML_SIZE_LIMIT = 200000; // Limit HTML to first 200k characters (change here if needed)
-const MAX_RETRIES = 5; // Maximum retry attempts for network failures
-const INITIAL_BACKOFF_MS = 1000; // Initial backoff delay (1 second)
-
-// Allowlist of domains to monitor (add/remove domains here)
-// Only pages from these domains will be sent to OpenAI
-const ALLOWLIST = [
-    // 'example.com',
-    // 'anotherdomain.com',
-    // Add your allowed domains here
-];
-
-// Track debounce timers per tab
-const debounceTimers = {};
-
-// Track last URL per tab to detect URL changes
-const lastUrls = {};
-
-/**
- * Check if user has opted in to page sync feature
- * @returns {Promise<boolean>} True if user has consented, false otherwise
- */
-async function getUserConsent() {
-    try {
-        const result = await chrome.storage.sync.get(['pageSyncEnabled']);
-        return result.pageSyncEnabled === true;
-    } catch (error) {
-        console.error('Error checking user consent:', error);
+        // Wait for script to initialize
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return true;
+      } catch (injectError) {
+        console.error('Failed to inject content script:', injectError.message);
         return false;
+      }
     }
+  } catch (error) {
+    console.error('Error in injectContentScriptIfNeeded:', error);
+    return false;
+  }
 }
 
-/**
- * Check if URL is allowed (not chrome:// and in allowlist if configured)
- * @param {string} url - The URL to check
- * @returns {boolean} True if URL is allowed
- */
-function isUrlAllowed(url) {
-    try {
-        const urlObj = new URL(url);
-        
-        // Never allow chrome:// URLs
-        if (urlObj.protocol === 'chrome:' || urlObj.protocol === 'chrome-extension:') {
-            return false;
-        }
-        
-        // If allowlist is empty, allow all HTTP/HTTPS URLs
-        if (ALLOWLIST.length === 0) {
-            return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
-        }
-        
-        // Check if domain is in allowlist
-        return ALLOWLIST.includes(urlObj.hostname);
-    } catch (error) {
-        // Invalid URL
-        return false;
+// Helper function to send message to content script with retries
+async function sendAnalyzeMessage(tabId, url) {
+  try {
+    // First, ensure content script is loaded
+    const injected = await injectContentScriptIfNeeded(tabId, url);
+    
+    if (!injected) {
+      console.warn('Cannot send message - content script injection failed');
+      return;
     }
+    
+    // Try to send message with retries
+    let retries = 3;
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await chrome.tabs.sendMessage(tabId, {
+          action: 'analyzePageOnTabSwitch'
+        });
+        console.log(`Successfully sent analyze message to tab (attempt ${attempt}):`, url);
+        return response;
+      } catch (err) {
+        lastError = err;
+        console.log(`Attempt ${attempt} failed for tab ${url}:`, err.message);
+        
+        if (attempt < retries) {
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+    }
+    
+    // If all retries failed, log the error
+    console.warn('Failed to send message to content script after all retries:', {
+      url: url,
+      error: lastError?.message,
+      tabId: tabId
+    });
+  } catch (error) {
+    console.error('Error in sendAnalyzeMessage:', error);
+  }
 }
 
-/**
- * Extract HTML content from page using programmatic injection
- * @param {number} tabId - The tab ID to extract HTML from
- * @returns {Promise<string|null>} The HTML content (truncated if needed), or null if access denied
- */
-async function extractPageHtml(tabId) {
-    try {
-        // Use executeScript with <all_urls> host_permissions
-        // With <all_urls>, we can access content from any webpage automatically
-        // This allows the extension to work when switching tabs
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tabId },
-            func: () => document.body.innerText
-        });
-        
-        if (!results || !results[0] || !results[0].result) {
-            return null;
-        }
-        
-        let html = results[0].result;
-        
-        // Sanitize: limit HTML size to protect privacy and reduce bandwidth
-        if (html.length > HTML_SIZE_LIMIT) {
-            html = html.substring(0, HTML_SIZE_LIMIT);
-        }
-        
-        return html;
-    } catch (error) {
-        // Handle permission errors gracefully
-        // With <all_urls> permission, most pages should be accessible
-        // Some restricted pages (chrome://, extensions://) will still fail
-        if (error.message && error.message.includes('Cannot access contents of url')) {
-            // Permission denied - may occur for restricted browser pages
-            const url = error.message.match(/url "([^"]+)"/)?.[1] || 'unknown';
-            console.log(`Cannot access page content (restricted page): ${url}`);
-            return null;
-        }
-        
-        console.error('Error extracting page HTML:', error);
-        return null;
-    }
-}
-
-/**
- * Send page data to Decision Agent for analysis
- * The Decision Agent determines if the page is travel-related and if insurance might be needed.
- * If insurance is needed, the Decision Agent automatically forwards a prompt to the Master Agent.
- * @param {Object} pageData - The page data to send (includes full HTML content)
- * @param {number} retryCount - Current retry attempt (starts at 0)
- */
-async function sendToDecisionAgent(pageData, retryCount = 0) {
-    const decisionAgentUrl = CONFIG.DECISION_AGENT_URL || 'http://localhost:8004';
-    
-    try {
-        // Send page data to Decision Agent for analysis
-        // The Decision Agent will:
-        // 1. Analyze if page is travel-related
-        // 2. Determine if insurance might be needed
-        // 3. Automatically forward to Master Agent if insurance should be prompted
-        const response = await fetch(`${decisionAgentUrl}/analyze`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                url: pageData.url,
-                title: pageData.title,
-                html_content: pageData.html,
-                timestamp: pageData.timestamp
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (!data.success) {
-            throw new Error(data.error || 'Decision Agent returned error');
-        }
-        
-        // Log the decision result
-        console.log('Decision Agent analysis:', {
-            should_prompt: data.should_prompt,
-            confidence: data.confidence,
-            is_travel_related: data.is_travel_related,
-            insurance_needed: data.insurance_needed,
-            forwarded_to_master: data.forwarded_to_master
-        });
-        
-        // Success - update last sent log
-        const timestamp = new Date().toLocaleString();
-        await chrome.storage.sync.set({ 
-            lastSentUrl: pageData.url,
-            lastSentTime: timestamp 
-        });
-        
-        // Notify popup if open
-        try {
-            chrome.runtime.sendMessage({ 
-                type: 'updateLastSent', 
-                url: pageData.url,
-                timestamp: timestamp 
-            }).catch(() => {
-                // Popup might not be open, ignore error
-            });
-        } catch (e) {
-            // Ignore message errors
-        }
-        
-        // If insurance prompt was forwarded, send master agent response to sidepanel chat
-        // Format it exactly like a normal chat response so React app handles it the same way
-        console.log('Decision Agent result:', {
-            forwarded_to_master: data.forwarded_to_master,
-            should_prompt: data.should_prompt,
-            has_response: !!data.master_agent_response,
-            response_length: data.master_agent_response?.length || 0,
-            travel_context: data.travel_context
-        });
-        
-        if (data.forwarded_to_master && data.should_prompt && data.master_agent_response) {
-            try {
-                console.log('Sending master agent response as chat message:', {
-                    message_preview: data.master_agent_response.substring(0, 100),
-                    url: pageData.url,
-                    title: pageData.title
-                });
-                
-                // Send as a 'chatResponse' type - same format as normal chat responses
-                // This way the React app can handle it exactly like a normal chat message
-                chrome.runtime.sendMessage({
-                    type: 'chatResponse',
-                    message: data.master_agent_response, // Master agent's response text
-                    metadata: {
-                        source: 'decision_agent',
-                        url: pageData.url,
-                        title: pageData.title,
-                        travel_context: data.travel_context,
-                        timestamp: timestamp
-                    }
-                }).then((response) => {
-                    console.log('✅ Successfully sent insurance prompt as chat response', response);
-                }).catch((error) => {
-                    console.error('❌ Error sending insurance prompt:', error);
-                    // Sidepanel might not be open - this is normal if user hasn't opened it yet
-                    // The message will be queued and delivered when sidepanel opens
-                });
-            } catch (e) {
-                console.error('❌ Error sending master agent response to sidepanel:', e);
-            }
-        } else {
-            console.log('⚠️ Not sending to sidepanel - missing conditions:', {
-                forwarded_to_master: data.forwarded_to_master,
-                should_prompt: data.should_prompt,
-                has_response: !!data.master_agent_response
-            });
-        }
-        
-    } catch (error) {
-        const isNetworkError = error.message.includes('Failed to fetch') || 
-                               error.message.includes('NetworkError') ||
-                               error.name === 'TypeError';
-        
-        if (isNetworkError && retryCount === 0) {
-            // First attempt failed - check if server is running
-            console.error('❌ Decision Agent server not reachable. Please ensure the server is running:');
-            console.error(`   Expected URL: ${decisionAgentUrl}`);
-            console.error(`   Start server with: cd Server/decision_agent && python -m decision_agent.server`);
-            console.error(`   Or check: ${decisionAgentUrl}/health`);
-        } else {
-            console.error(`Error sending to Decision Agent (attempt ${retryCount + 1}):`, error);
-        }
-        
-        // Exponential backoff retry logic
-        if (retryCount < MAX_RETRIES) {
-            const backoffDelay = INITIAL_BACKOFF_MS * Math.pow(2, retryCount);
-            console.log(`Retrying in ${backoffDelay}ms...`);
-            setTimeout(() => {
-                sendToDecisionAgent(pageData, retryCount + 1);
-            }, backoffDelay);
-        } else {
-            console.error('❌ Max retries reached. Failed to send page data to Decision Agent.');
-            console.error('   Make sure Decision Agent server is running on', decisionAgentUrl);
-            console.error('   See Server/decision_agent/QUICKSTART.md for setup instructions');
-        }
-    }
-}
-
-/**
- * Handle tab change (activation or URL update)
- * @param {number} tabId - The tab ID
- * @param {Object} changeInfo - Change information (from onUpdated)
- * @param {Object} tab - Tab object
- */
-async function handleTabChange(tabId, changeInfo, tab) {
-    // For onUpdated events: only process when page is fully loaded
-    // For onActivated events: changeInfo is null, so we skip this check
-    if (changeInfo && changeInfo.status !== 'complete') {
-        return;
-    }
-    
-    if (!tab || !tab.url) {
-        return;
-    }
-    
-    // Check if URL is allowed
-    if (!isUrlAllowed(tab.url)) {
-        return;
-    }
-    
-    // For onUpdated events: only process if URL actually changed
-    // For onActivated events: changeInfo is null, so we always process
-    // (user switching tabs should trigger sync even if URL is the same)
-    if (changeInfo !== null && lastUrls[tabId] === tab.url) {
-        // This is an onUpdated event and URL hasn't changed, skip
-        // (prevents duplicate sends on page reloads without URL change)
-        return;
-    }
-    
-    // Update last URL for this tab
-    lastUrls[tabId] = tab.url;
-    
-    // Check user consent before proceeding
-    const hasConsent = await getUserConsent();
-    if (!hasConsent) {
-        return;
-    }
-    
-    // Clear existing debounce timer for this tab
-    if (debounceTimers[tabId]) {
-        clearTimeout(debounceTimers[tabId]);
-        delete debounceTimers[tabId];
-    }
-    
-    // Set new debounce timer
-    debounceTimers[tabId] = setTimeout(async () => {
-        delete debounceTimers[tabId];
-        
-        try {
-            // Extract HTML from the page (this is the webpage content)
-            const html = await extractPageHtml(tabId);
-            
-            // Skip if HTML extraction failed (permission denied or other error)
-            if (html === null) {
-                console.log(`Skipping page sync for tab ${tabId}: unable to access page content`);
-                return;
-            }
-            
-            // Prepare page data with minimal metadata
-            // NOTE: The full webpage HTML is included here and sent to Decision Agent
-            const pageData = {
-                url: tab.url,
-                title: tab.title || 'Untitled',
-                timestamp: new Date().toISOString(),
-                html: html  // Full webpage HTML content (truncated to HTML_SIZE_LIMIT if needed)
-            };
-            
-            // Send webpage HTML to Decision Agent for analysis
-            // Decision Agent will determine if travel-related and if insurance is needed
-            // If yes, it will automatically forward to Master Agent for insurance prompt
-            await sendToDecisionAgent(pageData);
-            
-        } catch (error) {
-            console.error('Error processing tab change:', error);
-        }
-    }, DEBOUNCE_DELAY_MS);
-}
-
-// Listen for tab activation (when user switches to a different tab)
-// Pass null for changeInfo to indicate this is an activation, not an update
+// Listen for tab activation (when user switches tabs)
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    try {
-        const tab = await chrome.tabs.get(activeInfo.tabId);
-        // Pass null changeInfo to indicate tab activation (user switched tabs)
-        await handleTabChange(activeInfo.tabId, null, tab);
-    } catch (error) {
-        console.error('Error handling tab activation:', error);
+  try {
+    // Get the active tab
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    
+    // Only process http/https pages (skip chrome://, extension://, etc.)
+    if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+      console.log('Tab activated:', tab.url, 'status:', tab.status);
+      
+      // For already-loaded tabs, we can send with shorter delay
+      // For loading tabs, wait a bit longer for content script to initialize
+      const delay = tab.status === 'complete' ? 100 : 500;
+      
+      setTimeout(() => {
+        sendAnalyzeMessage(activeInfo.tabId, tab.url);
+      }, delay);
     }
+  } catch (error) {
+    console.error('Error handling tab activation:', error);
+  }
 });
 
-// Listen for tab updates (URL changes, page loads)
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-    await handleTabChange(tabId, changeInfo, tab);
+// Also listen for tab updates (when tab URL changes)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Only process when tab is complete and URL is http/https
+  if (changeInfo.status === 'complete' && tab.url && 
+      (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+    // Check if this is the active tab
+    chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
+      if (activeTabs.length > 0 && activeTabs[0].id === tabId) {
+        console.log('Active tab updated:', tab.url);
+        
+        // Send analyze message with a short delay
+        setTimeout(() => {
+          sendAnalyzeMessage(tabId, tab.url);
+        }, 300);
+      }
+    });
+  }
+});
+
+// Handle messages from content scripts to make API requests (bypasses CORS)
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'summarizePage') {
+    // Handle Summary Agent requests
+    const requestBody = {
+      inner_text: String(request.inner_text || ''),
+      url: String(request.url || ''),
+      title: String(request.title || ''),
+      travel_context: String(request.travel_context || '')
+    };
+    
+    // Validate required fields
+    if (!requestBody.inner_text || !requestBody.url || !requestBody.title) {
+      const error = 'Missing required fields: inner_text, url, or title';
+      console.error('Summary Agent validation error:', error);
+      sendResponse({ success: false, error: error });
+      return true;
+    }
+    
+    console.log('Background: Sending request to summary agent:', {
+      url: requestBody.url,
+      title: requestBody.title,
+      inner_text_length: requestBody.inner_text.length,
+      travel_context: requestBody.travel_context
+    });
+    
+    // Make the API request from background script (bypasses CORS)
+    fetch('http://localhost:8020/summarize', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    })
+    .then(async response => {
+      const responseData = await response.json().catch(() => ({}));
+      
+      if (!response.ok) {
+        let errorMessage;
+        if (typeof responseData.detail === 'string') {
+          errorMessage = responseData.detail;
+        } else if (typeof responseData.detail === 'object') {
+          errorMessage = JSON.stringify(responseData.detail);
+        } else if (responseData.message) {
+          errorMessage = responseData.message;
+        } else {
+          errorMessage = `HTTP error! status: ${response.status}`;
+        }
+        
+        console.error('Summary Agent API Error:', {
+          status: response.status,
+          statusText: response.statusText,
+          detail: responseData,
+          errorMessage: errorMessage
+        });
+        throw new Error(errorMessage);
+      }
+      return responseData;
+    })
+    .then(data => {
+      console.log('Background: Received successful response from summary agent');
+      sendResponse({ success: true, data: data });
+    })
+    .catch(error => {
+      console.error('Error in background fetch (summary agent):', error);
+      const errorMsg = error.message || String(error);
+      sendResponse({ success: false, error: errorMsg });
+    });
+    
+    // Return true to indicate we will send a response asynchronously
+    return true;
+  }
+  
+  if (request.action === 'analyzePage') {
+    // Prepare request body - ensure all fields are valid
+    const requestBody = {
+      url: String(request.url || ''),
+      title: String(request.title || ''),
+      inner_text: String(request.inner_text || ''),
+      timestamp: request.timestamp || new Date().toISOString()
+    };
+    
+    // Validate required fields
+    if (!requestBody.url || !requestBody.title || !requestBody.inner_text) {
+      const error = 'Missing required fields: url, title, or inner_text';
+      console.error('Validation error:', error, requestBody);
+      sendResponse({ success: false, error: error });
+      return true;
+    }
+    
+    // Log request for debugging
+    console.log('Background: Sending request to decision agent:', {
+      url: requestBody.url,
+      title: requestBody.title,
+      inner_text_length: requestBody.inner_text?.length || 0,
+      timestamp: requestBody.timestamp
+    });
+    
+    // Make the API request from background script (bypasses CORS)
+    fetch('http://localhost:8004/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    })
+    .then(async response => {
+      const responseData = await response.json().catch(() => ({}));
+      
+      if (!response.ok) {
+        // Get detailed error message from response
+        let errorMessage;
+        if (typeof responseData.detail === 'string') {
+          errorMessage = responseData.detail;
+        } else if (typeof responseData.detail === 'object') {
+          errorMessage = JSON.stringify(responseData.detail);
+        } else if (responseData.message) {
+          errorMessage = responseData.message;
+        } else {
+          errorMessage = `HTTP error! status: ${response.status}`;
+        }
+        
+        console.error('API Error:', {
+          status: response.status,
+          statusText: response.statusText,
+          detail: responseData,
+          errorMessage: errorMessage
+        });
+        console.error('Full response data:', JSON.stringify(responseData, null, 2));
+        throw new Error(errorMessage);
+      }
+      return responseData;
+    })
+    .then(data => {
+      console.log('Background: Received successful response from decision agent');
+      sendResponse({ success: true, data: data });
+    })
+    .catch(error => {
+      console.error('Error in background fetch:', error);
+      // Ensure error message is a string
+      const errorMsg = error.message || String(error);
+      sendResponse({ success: false, error: errorMsg });
+    });
+    
+    // Return true to indicate we will send a response asynchronously
+    return true;
+  }
 });
 

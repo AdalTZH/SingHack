@@ -63,6 +63,10 @@ class ChatMessage(BaseModel):
         None,
         description="List of document summaries from uploaded PDFs. Each should have file_name, summary, text, and metadata."
     )
+    page_summaries: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="List of page summaries from browsed travel pages. Each should have summary, url, title, travel_context, and metadata."
+    )
     
     class Config:
         json_schema_extra = {
@@ -76,6 +80,15 @@ class ChatMessage(BaseModel):
                         "summary": "This document outlines travel insurance policy details...",
                         "text": "Full extracted text...",
                         "metadata": {"pages": 5}
+                    }
+                ],
+                "page_summaries": [
+                    {
+                        "summary": "**Travel Type**: International Flight\n**Destination**: Tokyo, Japan\n**Dates**: Dec 15-22, 2024",
+                        "url": "https://example.com/flights",
+                        "title": "Flight Booking",
+                        "travel_context": "international flight",
+                        "metadata": {"model": "gpt-4o-mini"}
                     }
                 ]
             }
@@ -244,6 +257,16 @@ async def chat(request: ChatMessage):
                 print(f"   - Summary length: {len(doc.get('summary', ''))} chars")
     else:
         print("📄 Document Summaries: None provided")
+    if request.page_summaries:
+        print(f"🌐 Page Summaries: {len(request.page_summaries)} page(s) available")
+        for idx, page in enumerate(request.page_summaries, 1):
+            print(f"   Page {idx}: {page.get('title', 'Unknown')}")
+            print(f"   - URL: {page.get('url', 'Unknown')}")
+            print(f"   - Travel Context: {page.get('travel_context', 'Unknown')}")
+            if page.get('summary'):
+                print(f"   - Summary length: {len(page.get('summary', ''))} chars")
+    else:
+        print("🌐 Page Summaries: None provided")
     print("-"*80)
     
     logger.info(f"Received chat message: {request.message[:100]}...")
@@ -256,11 +279,12 @@ async def chat(request: ChatMessage):
             from .master_agent import MasterAgent
             agent = MasterAgent(temperature=request.temperature)
         
-        # Process the chat message with document summaries
+        # Process the chat message with document and page summaries
         result = agent.chat(
             message=request.message,
             conversation_history=request.conversation_history,
-            document_summaries=request.document_summaries
+            document_summaries=request.document_summaries,
+            page_summaries=request.page_summaries
         )
         
         if not result.get("success"):

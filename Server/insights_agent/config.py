@@ -9,7 +9,7 @@ OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o')
 TEMPERATURE = float(os.getenv('TEMPERATURE', '0.7'))
 
 # Insights Analytics API Configuration
-INSIGHTS_ANALYTICS_URL = os.getenv('INSIGHTS_ANALYTICS_URL', 'http://localhost:5001')
+INSIGHTS_ANALYTICS_URL = os.getenv('INSIGHTS_ANALYTICS_URL', 'http://localhost:5000')
 
 # Insights Agent Server Configuration
 INSIGHTS_AGENT_PORT = int(os.getenv('INSIGHTS_AGENT_PORT', 8008))
@@ -20,7 +20,7 @@ INSIGHTS_AGENT_SYSTEM_PROMPT = """You are an intelligent insights agent for a tr
 When a user asks a question, you need to decide:
 1. Would analyzing travel insurance claims data help answer this question?
 2. Would the insights from this analysis be persuasive for convincing someone to buy insurance?
-3. Is this query related to travel risks, destinations, claim statistics, or insurance needs?
+3. Is this query related to travel, destinations, claim statistics, or insurance needs?
 
 If the answer is YES to all three, you should recommend performing analytics.
 If the answer is NO to any, you should respond normally without analytics.

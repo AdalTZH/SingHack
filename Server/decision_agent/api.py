@@ -16,20 +16,20 @@ class DecisionAgentAPI:
     def __init__(self):
         self.agent = DecisionAgent()
     
-    def analyze_page_sync(self, url: str, title: str, html_content: str) -> Dict[str, Any]:
+    def analyze_page_sync(self, url: str, title: str, inner_text: str) -> Dict[str, Any]:
         """
         Main API method for analyzing page sync data
         
         Args:
             url: Page URL
             title: Page title
-            html_content: Page HTML/text content
+            inner_text: Page text content (innerText from browser)
             
         Returns:
             Dictionary with decision results
         """
         try:
-            result = self.agent.analyze_page(url, title, html_content)
+            result = self.agent.analyze_page(url, title, inner_text)
             result['success'] = True
             return result
         
@@ -43,20 +43,20 @@ class DecisionAgentAPI:
                 'reasoning': f'Error during analysis: {str(e)}'
             }
     
-    def should_prompt_insurance(self, url: str, title: str, html_content: str) -> bool:
+    def should_prompt_insurance(self, url: str, title: str, inner_text: str) -> bool:
         """
         Simple boolean check if insurance should be prompted
         
         Args:
             url: Page URL
             title: Page title
-            html_content: Page HTML/text content
+            inner_text: Page text content (innerText from browser)
             
         Returns:
             True if user should be prompted about insurance
         """
         try:
-            result = self.agent.analyze_page(url, title, html_content)
+            result = self.agent.analyze_page(url, title, inner_text)
             return result.get('should_prompt', False)
         except Exception as e:
             logger.error(f"Error in should_prompt_insurance: {e}")

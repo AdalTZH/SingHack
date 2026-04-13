@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SingPass Insurance Chat</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="chat-container">
+    <div class="chat-header">
+      <h1>Insurance Assistant</h1>
+      <div class="status-indicator">
+        <span class="status-dot"></span>
+        <span class="status-text">Online</span>
+      </div>
+    </div>
+    
+    <!-- Insights Banner (hidden by default) -->
+    <div class="insights-banner" id="insightsBanner" style="display: none;">
+      <div class="insights-header">
+        <span class="insights-icon">💡</span>
+        <span class="insights-title">Insights:</span>
+        <button class="insights-close" id="insightsClose" aria-label="Close insights">×</button>
+      </div>
+      <div class="insights-content" id="insightsContent"></div>
+    </div>
+    
+    <div class="chat-messages" id="chatMessages">
+      <div class="message bot-message">
+        <div class="message-avatar">🤖</div>
+        <div class="message-content">
+          <p>Hello! I'm your insurance assistant. How can I help you today? You can ask me about insurance policies, upload documents, or get quotes.</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="upload-section" id="uploadSection">
+      <div class="upload-area" id="uploadArea">
+        <div class="upload-icon">📄</div>
+        <p class="upload-text">Drag & drop PDF files here</p>
+        <p class="upload-subtext">or</p>
+        <label for="fileInput" class="browse-btn">Browse Files</label>
+        <input type="file" id="fileInput" accept=".pdf" multiple style="display: none;">
+      </div>
+      <div class="uploaded-files" id="uploadedFiles"></div>
+    </div>
+    
+    <div class="chat-input-container">
+      <div class="input-wrapper">
+        <button id="uploadIconBtn" class="upload-icon-btn" title="Upload PDF">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+        </button>
+        <textarea 
+          id="chatInput" 
+          placeholder="Type your message..."
+          rows="1"
+        ></textarea>
+        <button id="sendBtn" class="send-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="sidepanel.js"></script>
+</body>
+</html>
+

@@ -1,9 +1,0 @@
-{
-  "master_agent": 4384,
-  "decision_agent": 18720,
-  "policy_eligibility_scanner": 6328,
-  "quotation_api": 18788,
-  "insights_agent": 9712,
-  "pdf_extractor": 5836,
-  "policy_analyzer_mcp": 7860
-}

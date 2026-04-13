@@ -1,10 +1,10 @@
-# SingHack Backend - Multi-Agent Travel Insurance System
+# Chef - Multi-Agent Travel Insurance System
 
 A sophisticated multi-agent AI system for conversational travel insurance, built for the **Ancileo × MSIG Conversational Insurance Challenge**. This system transforms traditional insurance purchasing from a tedious form-filling process into an engaging, intelligent dialogue powered by multiple specialized AI agents.
 
 ## 🎯 Project Overview
 
-SingHack Backend is a comprehensive travel insurance platform that leverages a multi-agent architecture to provide intelligent, conversational insurance assistance. The system consists of:
+Chef is a comprehensive travel insurance platform that leverages a multi-agent architecture to provide intelligent, conversational insurance assistance. The system consists of:
 
 - **Chrome Extension** - Modern browser-based UI for user interactions
 - **Master Agent** - Central orchestration system that routes queries and synthesizes responses
